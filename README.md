@@ -32,6 +32,12 @@ Attic is vrije software: je mag het verspreiden en aanpassen onder de voorwaarde
 
 Attic gebruikt open-source werk van anderen, elk onder zijn eigen licentie (onder meer GPL 2 of later, GPL 3, MPL 2.0, MIT, BSD en Apache 2.0). De spellendatabase `Attic/Resources/GameDB.sqlite` is een bewerking van de [libretro-database](https://github.com/libretro/libretro-database) en valt onder [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). De licentieteksten staan in [`Attic/Resources/Licenses`](Attic/Resources/Licenses) en in de app onder Instellingen › Emulators en licenties.
 
+### Naam en logo
+
+De naam **Attic** en het **logo van Attic** (`Artwork/attic-logo.png` en het app-icoon in `Attic/Assets.xcassets/AppIcon.appiconset`) vallen niet onder de GPL: alle rechten voorbehouden. Op grond van artikel 7(e) van de GPL 3 geeft de licentie geen recht om de naam of het logo als merk te gebruiken. Verspreid je een aangepaste versie, geef die dan een eigen naam en een eigen icoon. Je mag wel zeggen waar hij vandaan komt, bijvoorbeeld "gebaseerd op Attic".
+
+*The name "Attic" and the Attic logo are not licensed under the GPL (GPL 3, section 7(e)); all rights reserved. Modified versions must use a different name and icon, but may say they are based on Attic.*
+
 Attic is niet verbonden aan Nintendo, Sony, Sega of andere fabrikanten. Namen van systemen zijn merken van hun eigenaars en staan er alleen om aan te geven welke spellen Attic kan spelen.
 
 ## Privacy

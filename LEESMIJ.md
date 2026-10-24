@@ -160,7 +160,7 @@ Wat de App Store vraagt en al geregeld is:
 - Privacymanifesten: `Attic/PrivacyInfo.xcprivacy` (UserDefaults, bestandsdatums, tijdmeting) en een eigen manifest in elk kernframework, dat `build_cores.py` maakt uit de symbolen die de kern gebruikt (`write_bundle_files`). Geen tracking, geen verzamelde gegevens.
 - De kernframeworks hebben nog geen dSYM's: de upload waarschuwt daarvoor, maar lukt wel (alleen crashes in een kern zijn dan niet te herleiden).
 - De kernframeworks hebben `CFBundleVersion` 1 (de App Store wil alleen cijfers); de commit van de kern staat in `AtticCoreCommit`.
-- Het app-icoon komt uit `Artwork/attic-logo.png` (het logo van Attic); `Artwork/make_icon.swift` snijdt het bij tot het vierkant en vult de hoeken met de achtergrond, want iOS rondt de hoeken zelf af.
+- Het app-icoon komt uit `Artwork/attic-logo.png` (het logo van Attic; de naam en het logo vallen niet onder de GPL, zie README › Naam en logo); `Artwork/make_icon.swift` snijdt het bij tot het vierkant en vult de hoeken met de achtergrond, want iOS rondt de hoeken zelf af.
 
 ## Opbouw
 

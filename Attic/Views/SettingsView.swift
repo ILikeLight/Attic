@@ -306,7 +306,7 @@ struct LicensesView: View {
     @State private var shown: String?
 
     private let components: [(name: String, role: String, license: String, file: String)] = [
-        ("Attic", "Deze app · ILikeLight. De broncode staat op github.com/ILikeLight/Attic", "GPL 3", "GPL-3.0-Attic"),
+        ("Attic", "Deze app · ILikeLight. De broncode staat op github.com/ILikeLight/Attic. De naam Attic en het logo vallen niet onder de GPL (artikel 7e): een aangepaste versie krijgt een eigen naam en icoon.", "GPL 3", "GPL-3.0-Attic"),
         ("mGBA", "Emulator voor Game Boy, Game Boy Color en Game Boy Advance · Jeffrey Pfau en anderen", "Mozilla Public License 2.0", "MPL-2.0-mGBA"),
         ("Nestopia UE", "Emulator voor NES · Martin Freij, Nestopia UE-bijdragers en Rupert Carmichael", "GPL 2 of later", "GPL-2.0-Nestopia"),
         ("bsnes", "Emulator voor Super Nintendo · byuu en anderen", "GPL 3", "GPL-3.0-bsnes"),
