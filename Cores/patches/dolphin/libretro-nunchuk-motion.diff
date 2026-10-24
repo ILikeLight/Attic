@@ -1,0 +1,28 @@
+diff -ruN a/Source/Core/DolphinLibretro/Input.cpp b/Source/Core/DolphinLibretro/Input.cpp
+--- a/Source/Core/DolphinLibretro/Input.cpp	2026-10-24 01:41:24
++++ b/Source/Core/DolphinLibretro/Input.cpp	2026-10-24 01:41:24
+@@ -1677,6 +1677,24 @@
+       wmButtons->SetControlExpression(4, "L");                             // -
+       wmButtons->SetControlExpression(5, "R");                             // +
+ 
++      // Attic: the Wii Remote's own movement from the frontend's accelerometer with a Nunchuk
++      // plugged in too, as the remote-only branch below does; upstream binds it only there.
++      if (Libretro::Input::sensor_enabled[port][SENSOR_ACCELEROMETER])
++      {
++        std::string devSensor = Libretro::Input::GetQualifiedNameSensor(port);
++        auto* wmAccel = static_cast<ControllerEmu::IMUAccelerometer*>(
++          wm->GetWiimoteGroup(WiimoteEmu::WiimoteGroup::IMUAccelerometer));
++        if (wmAccel)
++        {
++          wmAccel->SetControlExpression(0, "`" + devSensor + ":AccelZ+`");  // Up
++          wmAccel->SetControlExpression(1, "`" + devSensor + ":AccelZ-`");  // Down
++          wmAccel->SetControlExpression(2, "`" + devSensor + ":AccelX+`");  // Left
++          wmAccel->SetControlExpression(3, "`" + devSensor + ":AccelX-`");  // Right
++          wmAccel->SetControlExpression(4, "`" + devSensor + ":AccelY-`");  // Forward
++          wmAccel->SetControlExpression(5, "`" + devSensor + ":AccelY+`");  // Backward
++        }
++      }
++
+       f.irMode = true;
+     }
+     else

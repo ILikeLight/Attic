@@ -1,0 +1,57 @@
+diff -ruN a/Source/Core/VideoBackends/Vulkan/VKSwapChain.cpp b/Source/Core/VideoBackends/Vulkan/VKSwapChain.cpp
+--- a/Source/Core/VideoBackends/Vulkan/VKSwapChain.cpp	2026-10-23 17:41:08
++++ b/Source/Core/VideoBackends/Vulkan/VKSwapChain.cpp	2026-10-23 17:41:08
+@@ -198,6 +198,14 @@
+   // "g_ActiveConfig" might not have been been updated yet.
+   if (g_Config.bHDR && surface_format_RGBA16F_scRGB)
+     surface_format = surface_format_RGBA16F_scRGB;
++#if defined(__LIBRETRO__) && defined(__APPLE__)
++  // Changed by Attic: the frontend reads the picture as 8-bit colour, so MoltenVK's 10-bit
++  // surface format must not win (the frames came out black).
++  else if (surface_format_RGBA8)
++    surface_format = surface_format_RGBA8;
++  else if (surface_format_BGRA8)
++    surface_format = surface_format_BGRA8;
++#endif
+   else if (surface_format_RGB10_A2)
+     surface_format = surface_format_RGB10_A2;
+   else if (surface_format_RGBA8)
+diff -ruN a/Source/Core/VideoBackends/Vulkan/VulkanLoader.cpp b/Source/Core/VideoBackends/Vulkan/VulkanLoader.cpp
+--- a/Source/Core/VideoBackends/Vulkan/VulkanLoader.cpp	2026-10-23 16:51:16
++++ b/Source/Core/VideoBackends/Vulkan/VulkanLoader.cpp	2026-10-23 16:51:16
+@@ -4,6 +4,8 @@
+ #define VMA_IMPLEMENTATION
+ #include "VideoBackends/Vulkan/VulkanLoader.h"
+ 
++#include <cstring>
++
+ #if defined(ANDROID)
+ #include <adrenotools/driver.h>
+ #include <dlfcn.h>
+@@ -94,6 +96,26 @@
+ 
+ bool LoadVulkanLibrary(bool force_system_library)
+ {
++#if defined(__APPLE__) && defined(__LIBRETRO__)
++  // Changed by Attic: iOS has no libvulkan to open. The frontend links MoltenVK and hands over its
++  // vkGetInstanceProcAddr (Libretro::Video::Vk::Init), which also gives the module functions.
++  // vkGetDeviceProcAddr needs an instance; Vk::Init sets it.
++  if (vkGetInstanceProcAddr)
++  {
++#define VULKAN_MODULE_ENTRY_POINT(name, required)                                                  \
++  if (!name)                                                                                       \
++    name = reinterpret_cast<PFN_##name>(vkGetInstanceProcAddr(VK_NULL_HANDLE, #name));            \
++  if (!name && required && std::strcmp(#name, "vkGetDeviceProcAddr") != 0)                         \
++  {                                                                                                \
++    ERROR_LOG_FMT(VIDEO, "Vulkan: Failed to load required module function {}", #name);             \
++    return false;                                                                                  \
++  }
++#include "VideoBackends/Vulkan/VulkanEntryPoints.inl"
++#undef VULKAN_MODULE_ENTRY_POINT
++    return true;
++  }
++#endif
++
+   if (!s_vulkan_module.IsOpen() && !OpenVulkanLibrary(force_system_library))
+     return false;
+ 

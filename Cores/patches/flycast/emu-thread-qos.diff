@@ -1,0 +1,25 @@
+--- a/core/emulator.cpp	2026-10-23 13:08:02
++++ b/core/emulator.cpp	2026-10-23 13:08:02
+@@ -17,6 +17,9 @@
+     along with Flycast.  If not, see <https://www.gnu.org/licenses/>.
+  */
+ #include "emulator.h"
++#ifdef IOS
++#include <pthread.h>
++#endif
+ #include "types.h"
+ #include "stdclass.h"
+ #include "cfg/option.h"
+@@ -1003,6 +1006,12 @@
+ 		getSh4Executor()->Start();
+ 		threadResult = std::async(std::launch::async, [this] {
+ 				ThreadName _("Flycast-emu");
++#ifdef IOS
++				// Changed by Attic: without a QoS class iOS may run the emulation on the efficiency cores.
++				pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
++				// Flycast names its threads only on Linux; the name shows in Attic's performance figures.
++				pthread_setname_np("Flycast-emu");
++#endif
+ 				InitAudio();
+ 
+ 				try {

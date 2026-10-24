@@ -1,0 +1,18 @@
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+
+# Sources and objects of the cores (Cores/build_cores.py --build-dir)
+Cores/.build/
+
+# Python
+__pycache__/
+
+# macOS
+.DS_Store
+
+# Personal working notes and App Store Connect texts; not for the public repository
+OVERDRACHT.md
+Release/

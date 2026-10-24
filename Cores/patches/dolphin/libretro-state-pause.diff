@@ -1,0 +1,59 @@
+diff -ruN a/Source/Core/DolphinLibretro/Main.cpp b/Source/Core/DolphinLibretro/Main.cpp
+--- a/Source/Core/DolphinLibretro/Main.cpp	2026-10-23 17:41:08
++++ b/Source/Core/DolphinLibretro/Main.cpp	2026-10-23 17:41:08
+@@ -565,17 +565,21 @@
+   if (system.IsDualCoreMode())
+     ar->SetPassthrough(true);
+ 
++  // Changed by Attic: pause the CPU thread for real before touching its state. Declaring this
++  // thread the CPU thread did not stop the real one, which could still be running blocks, for
++  // instance right after boot, when Attic loads the auto-save: loading a state clears the block
++  // cache, and iCube's Cached Interpreter, which checks for a pause less often, then crashed.
+   const bool was_cpu = Core::IsCPUThread();
+-  if (!was_cpu)
+-    Core::DeclareAsCPUThread();
++  auto& cpu = system.GetCPU();
++  const bool was_unpaused = was_cpu ? false : cpu.PauseAndLock();
+ 
+-  Core::RunOnCPUThread(Core::System::GetInstance(), [&] {
++  {
+     PointerWrap p((u8**)&data, size, PointerWrap::Mode::Write);
+-    State::DoState(Core::System::GetInstance(), p);
+-  }, true);
++    State::DoState(system, p);
++  }
+ 
+   if (!was_cpu)
+-    Core::UndeclareAsCPUThread();
++    cpu.RestoreStateAndUnlock(was_unpaused);
+ 
+   if (system.IsDualCoreMode())
+     ar->SetPassthrough(false);
+@@ -594,17 +598,21 @@
+   if (system.IsDualCoreMode())
+     ar->SetPassthrough(true);
+ 
++  // Changed by Attic: pause the CPU thread for real before touching its state. Declaring this
++  // thread the CPU thread did not stop the real one, which could still be running blocks, for
++  // instance right after boot, when Attic loads the auto-save: loading a state clears the block
++  // cache, and iCube's Cached Interpreter, which checks for a pause less often, then crashed.
+   const bool was_cpu = Core::IsCPUThread();
+-  if (!was_cpu)
+-    Core::DeclareAsCPUThread();
++  auto& cpu = system.GetCPU();
++  const bool was_unpaused = was_cpu ? false : cpu.PauseAndLock();
+ 
+-  Core::RunOnCPUThread(Core::System::GetInstance(), [&] {
++  {
+     PointerWrap p((u8**)&data, size, PointerWrap::Mode::Read);
+-    State::DoState(Core::System::GetInstance(), p);
+-  }, true);
++    State::DoState(system, p);
++  }
+ 
+   if (!was_cpu)
+-    Core::UndeclareAsCPUThread();
++    cpu.RestoreStateAndUnlock(was_unpaused);
+ 
+   if (system.IsDualCoreMode())
+     ar->SetPassthrough(false);

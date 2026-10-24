@@ -1,0 +1,89 @@
+diff -ru a/core/hw/pvr/spg.cpp b/core/hw/pvr/spg.cpp
+--- a/core/hw/pvr/spg.cpp	2026-10-23 13:07:54
++++ b/core/hw/pvr/spg.cpp	2026-10-23 13:08:15
+@@ -171,7 +171,9 @@
+ 				u32 cycle_span = (u32)(sh4_sched_now64() - cpu_cycles[cpu_time_idx]);
+ 				u64 time_span = now - real_times[cpu_time_idx];
+ 				float cpu_speed = ((float)cycle_span / time_span) / (SH4_MAIN_CLOCK / 100000);
+-				SH4FastEnough = cpu_speed >= 85.f;
++				// Changed by Attic: skip frames before the game slows down noticeably. At 85% a GPU
++				// that is just too slow for every frame kept the game at 85-90% of its speed.
++				SH4FastEnough = cpu_speed >= 95.f;
+ 			}
+ 			else {
+ 				SH4FastEnough = false;
+diff -ru a/core/hw/sh4/interpr/sh4_interpreter.cpp b/core/hw/sh4/interpr/sh4_interpreter.cpp
+--- a/core/hw/sh4/interpr/sh4_interpreter.cpp	2026-10-23 13:07:54
++++ b/core/hw/sh4/interpr/sh4_interpreter.cpp	2026-10-23 13:08:29
+@@ -13,7 +13,10 @@
+ #include "../sh4_cache.h"
+ #include "debug/gdb_server.h"
+ #include "../sh4_cycles.h"
++#include "cfg/option.h"
+ 
++#include <algorithm>
++
+ Sh4ICache icache;
+ Sh4OCache ocache;
+ Sh4Interpreter *Sh4Interpreter::Instance;
+@@ -42,6 +45,14 @@
+ {
+ 	Instance = this;
+ 	ctx->restoreHostRoundingMode();
++#ifndef STRICT_MODE
++	// Changed by Attic: the interpreter normally counts every instruction as CPU_RATIO (8) times
++	// its cycles, an SH4 at 25 MHz, and many games then fall behind on their own frames. The SH4
++	// clock option (in MHz, only used by the dynarec before) now sets that ratio: 200 MHz is the
++	// real speed, 100 MHz half of it, and so on, down to Flycast's own 25 MHz.
++	const int clock = std::max(1, (int)config::Sh4Clock);
++	sh4cycles.setCpuRatio(std::clamp((200 + clock / 2) / clock, 1, CPU_RATIO));
++#endif
+ 
+ 	try {
+ 		do
+@@ -58,7 +69,7 @@
+ 			} catch (const SH4ThrownException& ex) {
+ 				Do_Exception(ex.epc, ex.expEvn);
+ 				// an exception requires the instruction pipeline to drain, so approx 5 cycles
+-				sh4cycles.addCycles(5 * CPU_RATIO);
++				sh4cycles.addCycles(5 * sh4cycles.getCpuRatio());
+ 			}
+ 		} while (ctx->CpuRunning);
+ 	} catch (const debugger::Stop&) {
+@@ -90,7 +101,7 @@
+ 	} catch (const SH4ThrownException& ex) {
+ 		Do_Exception(ex.epc, ex.expEvn);
+ 		// an exception requires the instruction pipeline to drain, so approx 5 cycles
+-		sh4cycles.addCycles(5 * CPU_RATIO);
++		sh4cycles.addCycles(5 * sh4cycles.getCpuRatio());
+ 	} catch (const debugger::Stop&) {
+ 	}
+ 	Instance = nullptr;
+diff -ru a/core/hw/sh4/sh4_cycles.h b/core/hw/sh4/sh4_cycles.h
+--- a/core/hw/sh4/sh4_cycles.h	2026-10-23 13:07:54
++++ b/core/hw/sh4/sh4_cycles.h	2026-10-23 13:08:15
+@@ -59,6 +59,15 @@
+ 		memOps = 0;
+ 	}
+ 
++	// Changed by Attic: the interpreter's underclock follows the SH4 clock option.
++	void setCpuRatio(int ratio) {
++		cpuRatio = ratio;
++	}
++
++	int getCpuRatio() const {
++		return cpuRatio;
++	}
++
+ 	u64 now() {
+ 		return sh4_sched_now64() + SH4_TIMESLICE - ctx->cycle_counter;
+ 	}
+@@ -78,7 +87,7 @@
+ 	static int writeExternalAccessCycles(u32 addr, u32 size);
+ 
+ 	sh4_eu lastUnit = CO;
+-	const int cpuRatio;
++	int cpuRatio;
+ 	int memOps = 0;
+ 	Sh4Context *ctx = nullptr;
+ };

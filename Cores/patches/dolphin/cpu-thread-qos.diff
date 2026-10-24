@@ -1,0 +1,27 @@
+diff --git a/Source/Core/Core/Core.cpp b/Source/Core/Core/Core.cpp
+index 4f70022..f698278 100644
+--- a/Source/Core/Core/Core.cpp
++++ b/Source/Core/Core/Core.cpp
+@@ -3,6 +3,10 @@
+ 
+ #include "Core/Core.h"
+ 
++#ifdef IPHONEOS
++#include <pthread.h>
++#endif
++
+ #include <algorithm>
+ #include <atomic>
+ #include <functional>
+@@ -351,6 +355,11 @@ static void CpuThread(Core::System& system, const std::optional<std::string> sav
+   else
+     Common::SetCurrentThreadName("CPU-GPU thread");
+ 
++#ifdef IPHONEOS
++  // Changed by Attic: without a QoS class iOS may run the emulated CPU on the efficiency cores.
++  pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
++#endif
++
+ #ifdef USE_ANALYTICS
+   // This needs to be delayed until after the video backend is ready.
+   DolphinAnalytics::Instance().ReportGameStart();

@@ -1,0 +1,9 @@
+LZMA SDK (7-Zip C code), by Igor Pavlov
+
+The 7z, LZMA, LZMA2, PPMd and branch-filter decoders in Attic come from the
+C folder of 7-Zip (https://github.com/ip7z/7zip). The authors placed this code
+in the public domain: anyone may copy, modify, publish, use, compile, sell or
+distribute it, for any purpose, commercial or non-commercial, and by any means.
+
+PCSX ReARMed also contains the LZMA decoder of the LZMA SDK (in libchdr, for CHD
+disc images), which is likewise in the public domain.
