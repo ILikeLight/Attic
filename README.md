@@ -11,7 +11,7 @@ Attic is een emulator-app voor de iPhone: je speelt er back-ups mee van spellen 
 - **Systemen**: Game Boy, Game Boy Color en Game Boy Advance (mGBA), NES (Nestopia UE), Super Nintendo (bsnes), Nintendo 64 (Mupen64Plus-Next met GLideN64), Nintendo DS (melonDS), Nintendo 3DS (Azahar), GameCube en Wii (Dolphin), PlayStation (PCSX ReARMed), PSP (PPSSPP) en Dreamcast (Flycast). Mega Drive en arcade worden herkend maar draaien nog niet.
 - Spellen toevoegen uit Bestanden (ook .zip en .7z), herkennen aan de inhoud, met titels en jaartallen uit de libretro-database en hoesjes van GameTDB en libretro.
 - Aanraakknoppen per systeem, staand en liggend, of Bluetooth-controllers (meerdere tegelijk, met eigen knoppenindeling en trillen).
-- Save states, terugspoelen, snel vooruit, en AirPlay naar je tv.
+- Save states, terugspoelen, snel vooruit, en AirPlay of Chromecast naar je tv.
 - Wii: je iPhone als Wii Remote, met beweging en een aanwijzer die je met je iPhone richt.
 - Samen spelen: andere iPhones met Attic in de buurt doen mee als controller.
 

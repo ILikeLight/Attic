@@ -40,6 +40,13 @@ struct PlayerView: View {
                     } else {
                         portraitLayout(session, width: geometry.size.width)
                     }
+                    if settings.showPerformance, let multiplayer, !multiplayer.players.isEmpty {
+                        LinkReadout(host: multiplayer)
+                            .padding(.top, landscape ? 56 : 60)
+                            .padding(.leading, landscape ? 4 : 12)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            .allowsHitTesting(false)
+                    }
                     if controlsPanelOpen {
                         ControlsPanel(landscape: landscape) {
                             closeControlsPanel()
@@ -99,21 +106,41 @@ struct PlayerView: View {
         .onChange(of: settings.rumble) { _, on in
             rumble.isEnabled = on
         }
+        .onChange(of: settings.soundWhenSilent) { _, on in
+            session?.playsWhenSilent = on
+        }
+        .onChange(of: settings.tvBothScreens, initial: true) { _, both in
+            display.bothScreens = both
+        }
         .onChange(of: settings.allowPlayers) { _, allowed in
             if allowed {
-                multiplayer?.open()
+                multiplayer?.open(direct: settings.directWiFi)
             } else {
                 multiplayer?.close()
             }
         }
         .onDisappear {
             multiplayer?.close()
+            Chromecast.shared.stop()
             UIApplication.shared.isIdleTimerDisabled = false
             tilt.stop()
             rumble.stop()
             controllers?.stop()
             if let session, display.session === session {
                 display.session = nil
+            }
+            // Gone without Stoppen: stop the game here as Stoppen would, so its emulator does
+            // not stay loaded and nothing goes unsaved.
+            if let session, !stopping, session.state != .stopped {
+                let autosave = settings.autosave && session.isActive
+                let wasPlaying = session.isActive
+                let library = library
+                Task {
+                    let result = await session.stop(autosave: autosave)
+                    if wasPlaying {
+                        library.recordSession(session.game.id, duration: result.played)
+                    }
+                }
             }
         }
     }
@@ -128,6 +155,9 @@ struct PlayerView: View {
                 menuButton(style: .portrait)
                 if settings.showPerformance {
                     PerformanceReadout(session: session)
+                        .frame(maxWidth: .infinity)
+                } else if display.isConnected && game.system.screen.isDual {
+                    TVLine()
                         .frame(maxWidth: .infinity)
                 } else {
                     Text(game.title)
@@ -198,18 +228,19 @@ struct PlayerView: View {
         let screen = session.game.system.screen
         let onTV = display.isConnected
         switch screen {
+        case _ where onTV && screen.isDual:
+            // The top screen is on the TV: the touch screen as wide as fits (the top bar says so).
+            let bottomWidth = width - 24
+            touchScreen(session)
+                .frame(width: bottomWidth, height: bottomWidth / screen.bottomAspectRatio)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         case .ds, .n3ds:
             let topWidth = width * (screen == .ds ? 0.77 : 0.92)
             let bottomWidth = width * (screen == .ds ? 0.77 : 0.74)
             VStack(spacing: 8) {
-                if onTV {
-                    TVNotice(compact: true)
-                        .frame(width: topWidth, height: 96)
-                } else {
-                    GameScreen(session: session, label: "Bovenscherm", region: session.game.system.screen.topRegion)
-                        .frame(width: topWidth, height: topWidth / screen.aspectRatio)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
+                GameScreen(session: session, label: "Bovenscherm", region: session.game.system.screen.topRegion)
+                    .frame(width: topWidth, height: topWidth / screen.aspectRatio)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 touchScreen(session)
                     .frame(width: bottomWidth, height: bottomWidth * 3 / 4)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -239,16 +270,17 @@ struct PlayerView: View {
         // Side by side, the two screens share the width.
         let dualHeight = min(fullHeight * 0.86, (size.width - 8) / (session.aspectRatio + game.system.screen.bottomAspectRatio))
         let onTV = display.isConnected
+        // With the top screen on the TV, the touch screen alone, as high as fits.
+        let touchHeight = min(fullHeight, size.width / game.system.screen.bottomAspectRatio)
         return ZStack {
-            if dual {
+            if dual && onTV {
+                touchScreen(session)
+                    .frame(width: touchHeight * game.system.screen.bottomAspectRatio, height: touchHeight)
+                    .ignoresSafeArea()
+            } else if dual {
                 HStack(spacing: 8) {
-                    if onTV {
-                        TVNotice(compact: true)
-                            .frame(width: dualHeight * session.aspectRatio * 0.8, height: 110)
-                    } else {
-                        GameScreen(session: session, label: "Bovenscherm", region: game.system.screen.topRegion)
-                            .frame(width: dualHeight * session.aspectRatio, height: dualHeight)
-                    }
+                    GameScreen(session: session, label: "Bovenscherm", region: game.system.screen.topRegion)
+                        .frame(width: dualHeight * session.aspectRatio, height: dualHeight)
                     touchScreen(session)
                         .frame(width: dualHeight * game.system.screen.bottomAspectRatio, height: dualHeight)
                 }
@@ -486,6 +518,7 @@ struct PlayerView: View {
             return
         }
         let session = EmulatorSession(game: game, saveStates: saveStates)
+        session.playsWhenSilent = settings.soundWhenSilent
         self.session = session
         display.session = session
         // In a game for more players, each next controller becomes player 2, 3 or 4.
@@ -505,14 +538,21 @@ struct PlayerView: View {
             toasts.show(message, isError: true)
         case .running:
             if let state = request.saveState {
-                toasts.show("\(state.label) geladen")
+                if !session.saveStateFailed {
+                    toasts.show("\(state.label) geladen")
+                } else if state.slot == nil, let kept = saveStates.keepAsSlot(state, gameID: game.id) {
+                    // Stopping makes a new auto-save; the one that did not load stays as a slot.
+                    toasts.show("Auto-save laadde niet; bewaard als \(kept.label)", isError: true)
+                } else {
+                    toasts.show("\(state.label) laadde niet; het spel begint opnieuw", isError: true)
+                }
             }
             if game.system.maxPlayers > 1 {
                 let multiplayer = MultiplayerHost(session: session)
                 multiplayer.onChange = { toasts.show($0) }
                 rumble.multiplayer = multiplayer
                 if settings.allowPlayers {
-                    multiplayer.open()
+                    multiplayer.open(direct: settings.directWiFi)
                 }
                 self.multiplayer = multiplayer
             }
@@ -651,6 +691,44 @@ private struct PerformanceReadout: View {
     }
 }
 
+/// Under Prestaties tonen while others play along: how evenly each player's messages come in
+/// (`LinkMonitor`). Gaps are the median, 95th percentile and largest; "netwerk" is how much longer
+/// than the quickest message one took, apart from how evenly the other iPhone sent them.
+private struct LinkReadout: View {
+    let host: MultiplayerHost
+    @State private var figures: [LinkMonitor.Figures] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(figures) { player in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Speler \(player.port + 1) · \(player.route)")
+                    Text(String(format: "%.0f/s · gat %.0f · p95 %.0f · max %.0f ms",
+                                player.perSecond, player.gapMedian, player.gap95, player.gapMax))
+                    if let delay95 = player.delay95, let delayMax = player.delayMax, let lost = player.lost {
+                        Text(String(format: "netwerk p95 %.0f · max %.0f ms · kwijt %.1f%%", delay95, delayMax, lost * 100))
+                    }
+                    if let empty = player.emptyFrames, let crowded = player.crowdedFrames {
+                        Text(String(format: "beelden zonder nieuws %.0f%% · met 2+ %.0f%%", empty * 100, crowded * 100))
+                    }
+                }
+            }
+        }
+        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+        .foregroundStyle(Palette.textSecondary)
+        .padding(8)
+        .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .opacity(figures.isEmpty ? 0 : 1)
+        .accessibilityElement(children: .combine)
+        .task {
+            while !Task.isCancelled {
+                figures = host.linkFigures()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+}
+
 private struct GameScreen: View {
     let session: EmulatorSession
     let label: String
@@ -704,6 +782,7 @@ private struct TouchScreenPlaceholder: View {
 // MARK: - Menu
 
 private struct PlayerMenu: View {
+    @Environment(AppSettings.self) private var settings
     @Environment(\.accent) private var accent
     let session: EmulatorSession
     let multiplayer: MultiplayerHost?
@@ -771,6 +850,10 @@ private struct PlayerMenu: View {
             if session.game.usesMotion && session.game.wiiSettings.controller == .nunchuk {
                 WiiRemoteHoldChoice(session: session)
             }
+            ChromecastRow(session: session)
+            if ExternalDisplay.shared.isConnected && session.game.system.screen.isDual {
+                tvScreensChoice
+            }
             if let multiplayer {
                 PlayersRow(host: multiplayer)
             }
@@ -779,6 +862,17 @@ private struct PlayerMenu: View {
         .padding(.horizontal, 20)
         .padding(.top, landscape ? 20 : 10)
         .padding(.bottom, landscape ? 20 : 12)
+    }
+
+    /// What a DS or 3DS game shows on the TV: the top screen, or both for someone watching along.
+    private var tvScreensChoice: some View {
+        @Bindable var settings = settings
+        return HStack {
+            Text("Op de tv").font(.text(13)).foregroundStyle(Palette.muted)
+            Spacer()
+            SegmentedChoice(options: [.init(value: false, title: "Bovenscherm"), .init(value: true, title: "Beide schermen")],
+                            selection: $settings.tvBothScreens)
+        }
     }
 
     private func tile(_ title: String, _ systemImage: String, action: @escaping () -> Void) -> some View {

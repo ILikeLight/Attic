@@ -35,12 +35,18 @@ struct RootView: View {
                 .presentationDetents([.large])
                 .atticSheet()
         }
-        .fullScreenCover(item: $router.playing) { request in
+        .fullScreenCover(item: $router.playing, onDismiss: showImportAfterPlaying) { request in
             PlayerView(request: request)
         }
         .fullScreenCover(isPresented: $router.showController) {
             ControllerView()
         }
+    }
+
+    private func showImportAfterPlaying() {
+        guard router.importAfterPlaying else { return }
+        router.importAfterPlaying = false
+        router.showImport = true
     }
 }
 

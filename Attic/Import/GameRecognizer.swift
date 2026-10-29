@@ -181,6 +181,9 @@ enum GameRecognizer {
         let kind = be64(title, 0x4C) >> 32
         let encryptedContent = title[record + 7] & 0x01 != 0
         let length = be64(title, record + 8)
+        // A damaged length must not run past the file (or overflow).
+        let (end, overflow) = contents.addingReportingOverflow(length)
+        guard !overflow, end <= reader.size else { return nil }
         let game = threeDSGame(reader, at: contents)
 
         var problem: String?
@@ -632,7 +635,8 @@ final class HeaderReader {
     }
 
     func bytes(at offset: UInt64, count: Int) -> [UInt8]? {
-        guard count > 0, offset + UInt64(count) <= size else { return nil }
+        // Offsets come from the file itself, so a damaged one must not overflow.
+        guard count > 0, offset <= size, UInt64(count) <= size - offset else { return nil }
         if offset + UInt64(count) <= UInt64(prefix.count) {
             return Array(prefix[Int(offset)..<(Int(offset) + count)])
         }

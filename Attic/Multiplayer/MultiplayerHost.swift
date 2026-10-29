@@ -25,6 +25,8 @@ final class MultiplayerHost {
 
     @ObservationIgnored private let session: EmulatorSession
     private nonisolated let remote: RemotePlayers
+    /// How evenly each player's messages come in, for Prestaties tonen.
+    private nonisolated let link = LinkMonitor()
     private nonisolated let queue = DispatchQueue(label: "app.attic.multiplayer", qos: .userInteractive)
     @ObservationIgnored private var listener: NWListener?
     /// The latest flow each controller wrote from, to answer it.
@@ -55,8 +57,9 @@ final class MultiplayerHost {
         session.game.system == .wii ? session.game.wiiSettings.controller.rawValue : ""
     }
 
-    func open() {
-        guard !isOpen, maxPlayers > 1, let listener = try? NWListener(using: PadLink.parameters) else { return }
+    /// `direct`: controllers may also reach this iPhone straight, without a Wi-Fi network (`PadLink.parameters`).
+    func open(direct: Bool) {
+        guard !isOpen, maxPlayers > 1, let listener = try? NWListener(using: PadLink.parameters(direct: direct)) else { return }
         listener.service = NWListener.Service(type: PadLink.serviceType,
                                               txtRecord: PadLink.txtRecord(title: session.game.title, system: session.game.system))
         listener.newConnectionHandler = { [weak self] connection in
@@ -89,6 +92,9 @@ final class MultiplayerHost {
         connections = [:]
         admitted.withLock { $0 = [:] }
         rumbles = [:]
+        for player in players {
+            link.remove(port: player.port)
+        }
         players = []
         requests = []
         rejected = []
@@ -104,6 +110,8 @@ final class MultiplayerHost {
         }
         let player = Player(id: id, port: port)
         rumbles[port] = nil
+        link.remove(port: port)
+        link.setRoute(PadLink.route(of: connections[id]?.currentPath), port: port)
         players.append(player)
         admitted.withLock { $0[id] = port }
         lastHeard.withLock { $0[id] = Date.timeIntervalSinceReferenceDate }
@@ -127,8 +135,14 @@ final class MultiplayerHost {
         }
     }
 
+    /// How evenly each player's messages came in lately, by player; once a second under Prestaties tonen.
+    func linkFigures() -> [LinkMonitor.Figures] {
+        link.figures(ports: players.map(\.port), frames: remote.frameCounts())
+    }
+
     func remove(_ player: Player, message: String? = nil) {
         rumbles[player.port] = nil
+        link.remove(port: player.port)
         players.removeAll { $0.id == player.id }
         admitted.withLock { $0[player.id] = nil }
         session.releasePort(player.port)
@@ -157,10 +171,11 @@ final class MultiplayerHost {
 
     private nonisolated func handle(_ message: PadMessage, from connection: NWConnection) {
         switch message {
-        case .input(let client, let mask, let left, let right, let motion):
+        case .input(let client, let mask, let left, let right, let motion, let stamp):
             // The fast path: straight to the emulation, without the main thread.
             guard let port = admitted.withLock({ $0[client] }) else { return }
             lastHeard.withLock { $0[client] = Date.timeIntervalSinceReferenceDate }
+            link.arrived(port: port, stamp: stamp)
             remote.set(port: port, mask: mask, left: left, right: right, motion: motion)
             if lastButtons.withLock({ $0.updateValue(mask, forKey: client) }) != mask {
                 Logger.multiplayer.debug("Speler \(port + 1): knoppen \(String(mask, radix: 2), privacy: .public)")
@@ -218,6 +233,7 @@ final class MultiplayerHost {
                 remove(player, message: "Verbinding met speler \(player.number) verbroken")
             } else {
                 sendAccepted(player)
+                link.setRoute(PadLink.route(of: connections[player.id]?.currentPath), port: player.port)
             }
         }
         requests.removeAll { now - (heard[$0] ?? 0) > 5 }

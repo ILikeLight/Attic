@@ -72,6 +72,14 @@ final class GameControllerInput {
         }
         taken = [:]
         input.set(0, from: .controller)
+        releaseSticks()
+    }
+
+    /// A stick left pushed by a controller that is gone would keep steering, and keep the stick
+    /// on the screen from working.
+    private func releaseSticks() {
+        input.setStick(.left, x: 0, y: 0, from: .controller)
+        input.setStick(.right, x: 0, y: 0, from: .controller)
     }
 
     /// Makes the controllers of a player vibrate, at 0 to 1. False when none of them can, so the
@@ -115,6 +123,9 @@ final class GameControllerInput {
             onChange("Controller van speler \(seat.port + 1) is weg")
         } else {
             updatePlayerOne()
+            if !taken.values.contains(where: { $0.port == 0 }) {
+                releaseSticks()
+            }
         }
     }
 

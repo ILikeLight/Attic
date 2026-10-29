@@ -70,6 +70,8 @@ struct SettingsView: View {
                         ToggleRow(label: "Automatisch opslaan bij stoppen", isOn: $settings.autosave)
                         ToggleRow(label: "Terugspoelen", detail: "Houd ⏪ ingedrukt tijdens het spelen om tot een minuut terug te gaan. Kost wat extra geheugen en batterij.",
                                   isOn: $settings.rewind)
+                        ToggleRow(label: "Geluid ook in stille modus", detail: "Het spel klinkt ook als je iPhone op stil staat. Muziek uit een andere app speelt gewoon mee.",
+                                  isOn: $settings.soundWhenSilent)
                         ToggleRow(label: "Trillen bij knoppen", isOn: $settings.haptics)
                         ToggleRow(label: "Trillen in spellen", detail: "Als een spel trilt (Rumble Pak, Wii Remote), trilt je controller mee, of zonder controller je iPhone",
                                   isOn: $settings.rumble)
@@ -86,8 +88,10 @@ struct SettingsView: View {
                         .lineSpacing(2)
                         .foregroundStyle(Palette.muted)
                     RowGroup {
-                        ToggleRow(label: "Prestaties tonen", detail: "Beelden per seconde, snelheid en processorgebruik boven het spel",
+                        ToggleRow(label: "Prestaties tonen", detail: "Beelden per seconde, snelheid en processorgebruik boven het spel; bij samen spelen ook hoe gelijkmatig de knoppen van de andere iPhones binnenkomen",
                                   isOn: $settings.showPerformance)
+                        ToggleRow(label: "Samen spelen ook zonder wifi", detail: "iPhones praten dan zo nodig rechtstreeks met elkaar, zoals bij AirDrop. Uit: alleen via je wifi-netwerk, om te vergelijken wat soepeler loopt. Geldt vanaf het volgende spel.",
+                                  isOn: $settings.directWiFi)
                         ForEach(PerformanceSetting.all) { setting in
                             SegmentRow(label: "\(setting.group) · \(setting.title)", detail: setting.detail) {
                                 SegmentedChoice(options: setting.choices.map { .init(value: $0.value, title: $0.title) },
@@ -339,6 +343,7 @@ struct LicensesView: View {
         ("inih", "Instellingenbestanden in mGBA · Ben Hoyt", "BSD 3-clause", "BSD-inih"),
         ("libpng", "PNG-bestanden in GLideN64 · Glenn Randers-Pehrson en anderen", "libpng-licentie", "Libpng"),
         ("MD5", "Spelherkenning in Mupen64Plus-Next · L. Peter Deutsch", "zlib-licentie", "Zlib-MD5"),
+        ("ascii-reveal", "Voorbeeld voor het laadeffect bij het toevoegen van een spel (de decode-stijl), in Attic opnieuw gemaakt zonder code over te nemen · Quan Hoang, github.com/quanhoangindex/ascii-reveal", "MIT", "MIT-ascii-reveal"),
         ("libretro-database", "Titels, jaartallen, regio's en spelcodes uit de No-Intro-, Redump- en GameTDB-lijsten, door Attic bewerkt tot een kleinere database in de app (GameDB.sqlite, ook CC BY-SA 4.0) · The libretro team en bijdragers, github.com/libretro/libretro-database", "CC BY-SA 4.0", "CC-BY-SA-4.0-libretro-database"),
         ("Bricolage Grotesque", "Lettertype voor koppen", "SIL Open Font License 1.1", "OFL-BricolageGrotesque"),
         ("Inter", "Lettertype voor tekst", "SIL Open Font License 1.1", "OFL-Inter"),

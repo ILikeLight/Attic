@@ -1,0 +1,81 @@
+diff -ruN a/Source/Core/DolphinLibretro/Main.cpp b/Source/Core/DolphinLibretro/Main.cpp
+--- a/Source/Core/DolphinLibretro/Main.cpp	2026-10-29 15:12:20
++++ b/Source/Core/DolphinLibretro/Main.cpp	2026-10-29 15:13:49
+@@ -551,7 +551,11 @@
+   if (system.IsDualCoreMode())
+     ar->SetPassthrough(false);
+ 
+-  return size;
++  // Changed by Attic: room to grow. The CPU thread runs on between this measurement and
++  // retro_serialize, and meanwhile a Wii's Bluetooth queue can grow (about 1 KB an event). A state
++  // that did not fit was cut off without a word, losing what comes last: the Wii Remotes and, with
++  // more cut, the processor's registers; such a state loaded only in part.
++  return size + (1 << 20);
+ }
+ 
+ bool retro_serialize(void* data, size_t size)
+@@ -573,9 +577,12 @@
+   auto& cpu = system.GetCPU();
+   const bool was_unpaused = was_cpu ? false : cpu.PauseAndLock();
+ 
++  // Changed by Attic: a state that does not fit is a failure, not a state with its end missing.
++  bool written;
+   {
+     PointerWrap p((u8**)&data, size, PointerWrap::Mode::Write);
+     State::DoState(system, p);
++    written = p.IsWriteMode();
+   }
+ 
+   if (!was_cpu)
+@@ -584,7 +591,7 @@
+   if (system.IsDualCoreMode())
+     ar->SetPassthrough(false);
+ 
+-  return true;
++  return written;
+ }
+ 
+ bool retro_unserialize(const void* data, size_t size)
+@@ -606,10 +613,33 @@
+   auto& cpu = system.GetCPU();
+   const bool was_unpaused = was_cpu ? false : cpu.PauseAndLock();
+ 
++  // Changed by Attic: a state that ends too early (cut off when it was made, see
++  // retro_serialize_size) or is not for this game loads only in part, leaving a mixed emulator.
++  // As Dolphin itself does with its undo buffer, the state as it was is kept and put back then.
++  size_t backup_size = 0;
+   {
++    PointerWrap p((u8**)&backup_size, sizeof(size_t), PointerWrap::Mode::Measure);
++    State::DoState(system, p);
++  }
++  std::vector<u8> backup(backup_size);
++  {
++    u8* ptr = backup.data();
++    PointerWrap p(&ptr, backup.size(), PointerWrap::Mode::Write);
++    State::DoState(system, p);
++  }
++
++  bool loaded;
++  {
+     PointerWrap p((u8**)&data, size, PointerWrap::Mode::Read);
+     State::DoState(system, p);
++    loaded = p.IsReadMode();
+   }
++  if (!loaded)
++  {
++    u8* ptr = backup.data();
++    PointerWrap p(&ptr, backup.size(), PointerWrap::Mode::Read);
++    State::DoState(system, p);
++  }
+ 
+   if (!was_cpu)
+     cpu.RestoreStateAndUnlock(was_unpaused);
+@@ -617,7 +647,7 @@
+   if (system.IsDualCoreMode())
+     ar->SetPassthrough(false);
+ 
+-  return true;
++  return loaded;
+ }
+ 
+ unsigned retro_get_region()

@@ -336,6 +336,8 @@ final class ZipArchive: Archive {
             while extra + 4 <= extraStart + extraLength {
                 let id = u16(directory, extra)
                 let size = Int(u16(directory, extra + 2))
+                // A field that claims to run past the extra data is damage, not something to read.
+                guard extra + 4 + size <= extraStart + extraLength else { throw ArchiveError.corrupt }
                 if id == 0x0001 {
                     var field = extra + 4
                     if uncompressed == 0xFFFF_FFFF, field + 8 <= extra + 4 + size { uncompressed = u64(directory, field); field += 8 }

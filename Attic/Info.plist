@@ -36,9 +36,10 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_attic-pad._udp</string>
+		<string>_googlecast._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Attic zoekt andere iPhones met Attic in de buurt, zodat je met je iPhone als controller kunt meespelen.</string>
+	<string>Attic zoekt andere iPhones met Attic in de buurt, zodat je met je iPhone als controller kunt meespelen, en Chromecasts om je spel op de tv te spelen.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>BricolageGrotesque.ttf</string>

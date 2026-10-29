@@ -22,6 +22,11 @@ final class AppRouter {
     var libraryFilter: GameSystem?
     var playing: PlayRequest?
     var showImport = false
+    /// A file came in through "Open in Attic" while a game was being played: its import is shown
+    /// once the game is stopped, instead of closing the game unsaved.
+    var importAfterPlaying = false
+    /// A game whose removal was chosen from its context menu, waiting for confirmation.
+    var removalRequest: UUID?
     /// This iPhone joins a game on another iPhone as its controller (`ControllerView`).
     var showController = false
 

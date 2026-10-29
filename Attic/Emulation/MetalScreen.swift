@@ -116,8 +116,46 @@ final class ScreenRenderer: NSObject, MTKViewDelegate {
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {
+        guard let source = currentSource(), let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
+              let commands = queue.makeCommandBuffer(),
+              let encoder = commands.makeRenderCommandEncoder(descriptor: pass) else { return }
+        draw(source, region: region, outputSize: SIMD2(Float(view.drawableSize.width), Float(view.drawableSize.height)), with: encoder)
+        encoder.endEncoding()
+        commands.present(drawable)
+        commands.commit()
+    }
+
+    /// Draws the current frame into `target` (for a Chromecast): each region of the picture in its
+    /// own rectangle of it, in pixels, on black. `done` runs once the GPU has finished.
+    func render(into target: MTLTexture, parts: [(region: CGRect, frame: CGRect)], done: @escaping () -> Void) -> Bool {
+        guard let source = currentSource(), let commands = queue.makeCommandBuffer() else { return false }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = target
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        pass.colorAttachments[0].storeAction = .store
+        guard let encoder = commands.makeRenderCommandEncoder(descriptor: pass) else { return false }
+        for part in parts {
+            encoder.setViewport(MTLViewport(originX: part.frame.minX, originY: part.frame.minY, width: part.frame.width,
+                                            height: part.frame.height, znear: 0, zfar: 1))
+            draw(source, region: part.region, outputSize: SIMD2(Float(part.frame.width), Float(part.frame.height)), with: encoder)
+        }
+        encoder.endEncoding()
+        commands.addCompletedHandler { _ in done() }
+        commands.commit()
+        return true
+    }
+
+    private struct Source {
+        let texture: MTLTexture
+        /// The part of the texture the picture uses, and whether its rows are stored bottom-up.
+        let used: SIMD2<Float>
+        let flipped: UInt32
+    }
+
+    /// The current frame as a texture, uploaded if it is new.
+    private func currentSource() -> Source? {
         var source: MTLTexture?
-        // The part of the texture the picture uses, and whether its rows are stored bottom-up.
         var used = SIMD2<Float>(1, 1)
         var flipped: UInt32 = 0
         if let (surface, width, height) = frameBuffer.readSurface() {
@@ -141,24 +179,24 @@ final class ScreenRenderer: NSObject, MTKViewDelegate {
             }
             source = texture
         }
+        return source.map { Source(texture: $0, used: used, flipped: flipped) }
+    }
 
-        guard let source, let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
-              let commands = queue.makeCommandBuffer(),
-              let encoder = commands.makeRenderCommandEncoder(descriptor: pass) else { return }
-        var outputSize = SIMD2<Float>(Float(view.drawableSize.width), Float(view.drawableSize.height))
+    /// Draws `region` of the picture into the encoder's viewport, which is `outputSize` pixels.
+    private func draw(_ source: Source, region: CGRect, outputSize: SIMD2<Float>, with encoder: MTLRenderCommandEncoder) {
+        var outputSize = outputSize
+        var flipped = source.flipped
+        let used = source.used
         // A bottom-up picture keeps its top rows at the end of the used part.
         let top = flipped == 1 ? 1 - region.maxY : region.minY
         var shown = SIMD4<Float>(Float(region.minX) * used.x, Float(top) * used.y, Float(region.width) * used.x, Float(region.height) * used.y)
         encoder.setRenderPipelineState(pipeline)
-        encoder.setFragmentTexture(source, index: 0)
+        encoder.setFragmentTexture(source.texture, index: 0)
         encoder.setFragmentSamplerState(sampler, index: 0)
         encoder.setFragmentBytes(&outputSize, length: MemoryLayout<SIMD2<Float>>.size, index: 0)
         encoder.setFragmentBytes(&shown, length: MemoryLayout<SIMD4<Float>>.size, index: 1)
         encoder.setFragmentBytes(&flipped, length: MemoryLayout<UInt32>.size, index: 2)
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
-        encoder.endEncoding()
-        commands.present(drawable)
-        commands.commit()
     }
 
     /// A Metal texture over a GPU core's surface; made once per surface.

@@ -13,6 +13,8 @@ final class MultiplayerClient {
         let endpoint: NWEndpoint
         let title: String
         let system: GameSystem?
+        /// The other iPhone speaks the same messages; with another version of Attic they cannot play together.
+        let isCompatible: Bool
     }
 
     enum Phase: Equatable {
@@ -34,6 +36,8 @@ final class MultiplayerClient {
     }
     /// The game on the other iPhone makes this player's controller vibrate, 0 to 1; only changes come in.
     @ObservationIgnored var onRumble: (Float) -> Void = { _ in }
+    /// Also look for games straight on other iPhones, without a Wi-Fi network (`PadLink.parameters`).
+    @ObservationIgnored var direct = true
     @ObservationIgnored private var rumble: Float = 0
 
     private nonisolated let id = UUID()
@@ -47,6 +51,9 @@ final class MultiplayerClient {
     private nonisolated let admitted = Atomic(false)
     /// This iPhone's movement as its Wii Remote's, while it plays a Wii game with one; read by the sender.
     private nonisolated let motion = Mutex<WiiMotion?>(nil)
+    /// Input messages sent, and how many of them when the figures were last asked for (`linkFigures`).
+    private nonisolated let inputsSent = Atomic(0)
+    @ObservationIgnored private var lastFigures: (time: Double, sent: Int)?
 
     /// How this iPhone is held now counts as its Wii Remote held level (`WiiMotion.level`).
     func levelWiiRemote() {
@@ -57,7 +64,7 @@ final class MultiplayerClient {
         stopBrowsing()
         hosts = []
         phase = .searching
-        let browser = NWBrowser(for: .bonjourWithTXTRecord(type: PadLink.serviceType, domain: nil), using: PadLink.parameters)
+        let browser = NWBrowser(for: .bonjourWithTXTRecord(type: PadLink.serviceType, domain: nil), using: PadLink.parameters(direct: direct))
         browser.browseResultsChangedHandler = { [weak self] results, _ in
             let found = results.compactMap(Self.host(from:))
             DispatchQueue.main.async {
@@ -75,7 +82,7 @@ final class MultiplayerClient {
         stopBrowsing()
         phase = .asking(host)
         lastHeard = .now
-        let connection = NWConnection(to: host.endpoint, using: PadLink.parameters)
+        let connection = NWConnection(to: host.endpoint, using: PadLink.parameters(direct: direct))
         connection.start(queue: queue)
         receive(on: connection)
         self.connection = connection
@@ -124,9 +131,10 @@ final class MultiplayerClient {
     }
 
     private nonisolated static func host(from result: NWBrowser.Result) -> Host? {
-        guard case .bonjour(let txt) = result.metadata, txt["v"] == String(PadLink.version) else { return nil }
+        // Other versions are listed too, so the player sees why joining does not work.
+        guard case .bonjour(let txt) = result.metadata, let version = txt["v"] else { return nil }
         return Host(id: "\(result.endpoint)", endpoint: result.endpoint, title: txt["game"] ?? "Een spel",
-                    system: txt["system"].flatMap(GameSystem.init(rawValue:)))
+                    system: txt["system"].flatMap(GameSystem.init(rawValue:)), isCompatible: version == String(PadLink.version))
     }
 
     /// Asks to join twice a second until let in; then sends the buttons as they change, the
@@ -155,8 +163,11 @@ final class MultiplayerClient {
             let motion = self.motion.withLock { $0 }?.reading.withLock { $0 }
             let state = SentState.Pad(mask: mask, left: sticks.left, right: sticks.right)
             guard state != sent.pad || since > (motion == nil ? 50_000_000 : 16_000_000) else { return }
-            let message = PadMessage.input(client: id, mask: mask, left: sticks.left, right: sticks.right, motion: motion ?? .zero)
+            sent.sequence &+= 1
+            let message = PadMessage.input(client: id, mask: mask, left: sticks.left, right: sticks.right, motion: motion ?? .zero,
+                                           stamp: .now(sequence: sent.sequence))
             connection.send(content: message.encoded(), completion: .idempotent)
+            self.inputsSent.add(1, ordering: .relaxed)
             sent.pad = state
             sent.time = now
         }
@@ -228,6 +239,16 @@ final class MultiplayerClient {
         onRumble(strength)
     }
 
+    /// For Prestaties tonen on this iPhone: how the connection runs, the input messages sent per
+    /// second since the previous call, and how late the motion sensor's readings reach the app.
+    func linkFigures() -> (route: String, perSecond: Double?, sensor: DeviceMotion.Delivery?) {
+        let now = Double(DispatchTime.now().uptimeNanoseconds) / 1e9
+        let sent = inputsSent.load(ordering: .relaxed)
+        defer { lastFigures = (now, sent) }
+        let perSecond = lastFigures.map { Double(sent - $0.sent) / max(now - $0.time, 0.001) }
+        return (PadLink.route(of: connection?.currentPath), perSecond, DeviceMotion.shared.delivery())
+    }
+
     /// The host answers at least twice a second; five quiet seconds mean it is gone.
     private func watch() {
         guard Date.now.timeIntervalSince(lastHeard) > 5 else { return }
@@ -246,4 +267,5 @@ private final class SentState: @unchecked Sendable {
 
     var time: UInt64 = 0
     var pad: Pad?
+    var sequence: UInt16 = 0
 }

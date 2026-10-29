@@ -61,6 +61,37 @@ final class AudioOutput: @unchecked Sendable {
     private var scratch: UnsafeMutablePointer<Int16>?
     private(set) var sampleRate: Double = 0
     private var maxLatencySamples = 0
+    /// The game is running, so sound should play; set on the main thread.
+    private var isPlaying = false
+    /// Plays also when the iPhone is on silent; set on the main thread.
+    var playsWhenSilent = false {
+        didSet {
+            if isPlaying && playsWhenSilent != oldValue {
+                activateSession()
+            }
+        }
+    }
+    private var observers: [NSObjectProtocol] = []
+
+    init() {
+        // iOS stops the engine when the output changes (AirPods or headphones in or out) and
+        // for an interruption (a call, Siri); while the game runs, it plays on afterwards.
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            self?.restartIfPlaying()
+        })
+        observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
+            guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return }
+            self?.restartIfPlaying()
+        })
+    }
+
+    private func restartIfPlaying() {
+        guard isPlaying else { return }
+        ring.clear()
+        start()
+    }
 
     func configure(sampleRate: Double) {
         // The session before the graph, as Apple recommends. The other way round, the Simulator
@@ -105,6 +136,7 @@ final class AudioOutput: @unchecked Sendable {
     }
 
     func start() {
+        isPlaying = true
         activateSession()
         do {
             if !engine.isRunning {
@@ -116,16 +148,21 @@ final class AudioOutput: @unchecked Sendable {
     }
 
     private func activateSession() {
-        try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default)
+        // Ambient sound is silenced by the silent switch; playback is not. Both mix with other
+        // apps' sound (music, a podcast), as before.
+        try? AVAudioSession.sharedInstance().setCategory(playsWhenSilent ? .playback : .ambient, mode: .default,
+                                                         options: playsWhenSilent ? .mixWithOthers : [])
         try? AVAudioSession.sharedInstance().setActive(true)
     }
 
     func pause() {
+        isPlaying = false
         engine.pause()
         ring.clear()
     }
 
     func stop() {
+        isPlaying = false
         engine.stop()
         ring.clear()
     }
@@ -140,6 +177,7 @@ final class AudioOutput: @unchecked Sendable {
     }
 
     deinit {
+        observers.forEach(NotificationCenter.default.removeObserver)
         engine.stop()
         scratch?.deallocate()
     }

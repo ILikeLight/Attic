@@ -59,10 +59,19 @@ final class HapticMotor {
     private init(engine: CHHapticEngine) {
         self.engine = engine
         engine.playsHapticsOnly = true
+        // After iOS stopped or reset the engine, the next strength starts the motor again, also
+        // when the game keeps asking for the same one.
         engine.resetHandler = { [weak self] in
             Task { @MainActor in
                 self?.player = nil
+                self?.strength = 0
                 try? self?.engine.start()
+            }
+        }
+        engine.stoppedHandler = { [weak self] _ in
+            Task { @MainActor in
+                self?.player = nil
+                self?.strength = 0
             }
         }
     }

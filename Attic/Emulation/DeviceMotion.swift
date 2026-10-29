@@ -17,8 +17,19 @@ final class DeviceMotion {
         let turned: Bool
     }
 
+    /// How the readings reach the app, for Prestaties tonen: per second, and how long after the
+    /// sensor took them, in milliseconds. A busy main thread holds them up.
+    struct Delivery {
+        var perSecond: Double
+        var lateness95: Double
+        var latenessMax: Double
+    }
+
     private let manager = CMMotionManager()
     private var listeners: [ObjectIdentifier: (Sample) -> Void] = [:]
+    /// The lateness of each reading since `delivery()` was last called, in seconds.
+    private var lateness: [Double] = []
+    private var lastDelivery = ProcessInfo.processInfo.systemUptime
     private weak var scene: UIWindowScene?
     private var orientation: UIInterfaceOrientation?
 
@@ -47,7 +58,28 @@ final class DeviceMotion {
         }
     }
 
+    /// The readings since the previous call; nil when none came.
+    func delivery() -> Delivery? {
+        let now = ProcessInfo.processInfo.systemUptime
+        defer {
+            lateness = []
+            lastDelivery = now
+        }
+        guard !lateness.isEmpty else { return nil }
+        let sorted = lateness.sorted()
+        return Delivery(perSecond: Double(sorted.count) / max(now - lastDelivery, 0.001),
+                        lateness95: sorted[Int((Double(sorted.count - 1) * 0.95).rounded())] * 1000,
+                        latenessMax: sorted[sorted.count - 1] * 1000)
+    }
+
     private func deliver(_ data: CMDeviceMotion) {
+        // Both count from the iPhone's start. Started over every ten seconds or so when nobody asks.
+        let now = ProcessInfo.processInfo.systemUptime
+        if lateness.count >= 1_000 {
+            lateness.removeAll(keepingCapacity: true)
+            lastDelivery = now
+        }
+        lateness.append(now - data.timestamp)
         let current = scene?.effectiveGeometry.interfaceOrientation ?? .portrait
         let turned = orientation != nil && current != orientation
         orientation = current

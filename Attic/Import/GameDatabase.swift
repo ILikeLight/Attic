@@ -11,6 +11,8 @@ final class GameDatabase: @unchecked Sendable {
         let title: String
         let year: Int?
         let region: String?
+        /// The game code without separators, such as RM8P; nil for most cartridges.
+        let serial: String?
     }
 
     static let shared = GameDatabase()
@@ -48,6 +50,24 @@ final class GameDatabase: @unchecked Sendable {
         return nil
     }
 
+    /// The game a file or archive named the No-Intro or Redump way is, whatever its system, such as
+    /// "Mario Party 8 (Europe) (En,Fr,De,Es,It).7z" or "Tetris (World).gb.zip". Nil when no list or
+    /// several systems' lists have the name.
+    func entry(named fileName: String) -> (system: GameSystem, entry: Entry)? {
+        var name = (fileName as NSString).deletingPathExtension
+        // A game's own extension inside the archive's, as in "Tetris (World).gb.zip".
+        if (name as NSString).pathExtension.count <= 4, !(name as NSString).pathExtension.isEmpty {
+            name = (name as NSString).deletingPathExtension
+        }
+        guard name.contains(" (") else { return nil }
+        lock.lock()
+        defer { lock.unlock() }
+        let found = GameSystem.allCases.compactMap { system in
+            first(where: "name = ?", system: system, value: .text(name)).map { (system: system, entry: $0) }
+        }
+        return found.count == 1 ? found[0] : nil
+    }
+
     /// Game codes are compared without separators: SCUS-94900 and SCUS_949.00 are SCUS94900.
     static func serialKey(_ serial: String) -> String {
         String(serial.uppercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) && $0.isASCII })
@@ -61,7 +81,7 @@ final class GameDatabase: @unchecked Sendable {
     private func first(where condition: String, system: GameSystem, value: Value) -> Entry? {
         guard let db else { return nil }
         var statement: OpaquePointer?
-        let sql = "SELECT name, title, year, region FROM games WHERE system = ? AND \(condition) LIMIT 1"
+        let sql = "SELECT name, title, year, region, serial FROM games WHERE system = ? AND \(condition) LIMIT 1"
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(statement) }
         sqlite3_bind_text(statement, 1, system.rawValue, -1, Self.transient)
@@ -74,7 +94,8 @@ final class GameDatabase: @unchecked Sendable {
             name: String(cString: sqlite3_column_text(statement, 0)),
             title: String(cString: sqlite3_column_text(statement, 1)),
             year: sqlite3_column_type(statement, 2) == SQLITE_NULL ? nil : Int(sqlite3_column_int(statement, 2)),
-            region: sqlite3_column_text(statement, 3).map { String(cString: $0) }
+            region: sqlite3_column_text(statement, 3).map { String(cString: $0) },
+            serial: sqlite3_column_text(statement, 4).map { String(cString: $0) }
         )
     }
 

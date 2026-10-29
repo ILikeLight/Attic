@@ -64,6 +64,23 @@ struct LibraryView: View {
                 .presentationDetents([.height(390)])
                 .atticSheet()
         }
+        // Removing from the context menu asks first, as on the game's page.
+        .confirmationDialog(removalTitle, isPresented: Binding { router.removalRequest != nil } set: { if !$0 { router.removalRequest = nil } },
+                            titleVisibility: .visible) {
+            Button("Verwijderen", role: .destructive) {
+                if let id = router.removalRequest {
+                    library.remove(id)
+                    saveStates.forget(id)
+                }
+                router.removalRequest = nil
+            }
+        } message: {
+            Text("Het spel en alle saves worden van deze iPhone verwijderd.")
+        }
+    }
+
+    private var removalTitle: String {
+        router.removalRequest.flatMap(library.game).map { "\($0.title) verwijderen?" } ?? "Verwijderen?"
     }
 
     private var header: some View {
@@ -374,8 +391,7 @@ struct GameContextMenu: View {
             Label(game.isFavorite ? "Geen favoriet meer" : "Favoriet", systemImage: game.isFavorite ? "star.slash" : "star")
         }
         Button(role: .destructive) {
-            library.remove(game.id)
-            saveStates.forget(game.id)
+            router.removalRequest = game.id
         } label: {
             Label("Verwijderen", systemImage: "trash")
         }

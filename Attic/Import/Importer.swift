@@ -50,6 +50,9 @@ final class ImportJob: Identifiable {
     private(set) var current: Step = .extract
     /// Extraction progress, 0–1.
     var progress: Double = 0
+    /// The game as far as known, for the sheet's cover and title: while unpacking the one the
+    /// archive's name promises (`ImportPipeline.expectedGame`), then the one that was recognized.
+    var preview: Game?
     private(set) var outcome: Outcome?
 
     init(sourceName: String, sourceSize: Int64) {
@@ -195,6 +198,27 @@ struct ImportPipeline {
         let files = workspace.appendingPathComponent("files", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: workspace) }
 
+        // While unpacking, the sheet already shows the game an official archive name promises,
+        // and fetches its cover meanwhile; step 3 takes that cover if the name told the truth.
+        let expected = Self.expectedGame(for: source)
+        job.preview = expected
+        var expectedCover: Task<BoxArtFetcher.Outcome, Never>?
+        if fetchCovers, let expected {
+            expectedCover = Task { [paths] in
+                let outcome = await BoxArtFetcher(paths: paths).fetch(for: expected)
+                if job.preview?.id == expected.id {
+                    job.preview?.record(outcome)
+                }
+                return outcome
+            }
+        }
+        defer {
+            expectedCover?.cancel()
+            if let expected {
+                try? FileManager.default.removeItem(at: paths.coverFile(expected.id))
+            }
+        }
+
         // 1. Unpack
         let kind = ArchiveKind.detect(source)
         do {
@@ -257,11 +281,18 @@ struct ImportPipeline {
         if fetchCovers {
             let fetcher = BoxArtFetcher(paths: paths)
             for index in games.indices where library.duplicate(of: games[index].game) == nil {
+                if index == 0, let expected, let art = await expectedCover?.value.art,
+                   expected.system == games[0].game.system, expected.databaseName == games[0].game.databaseName,
+                   (try? FileManager.default.copyItem(at: paths.coverFile(expected.id), to: paths.coverFile(games[0].game.id))) != nil {
+                    games[0].game.record(.found(art))
+                    continue
+                }
                 job.update(.metadata, "Hoes ophalen…")
                 games[index].game.record(await fetcher.fetch(for: games[index].game))
             }
         }
         let lead = games[0].game
+        job.preview = lead
         job.complete(.metadata, [lead.title, lead.region, lead.year].compactMap { $0 }.joined(separator: " · "))
 
         // 4. Add
@@ -425,6 +456,32 @@ struct ImportPipeline {
         }
         game.metadataVersion = GameMetadata.version
         game.artSeed = Self.seed(for: game.title)
+        return game
+    }
+
+    /// The game an official No-Intro or Redump file name promises, from the database alone, so the
+    /// sheet can show it before the archive is unpacked. Nil for other names.
+    static func expectedGame(for source: URL) -> Game? {
+        guard let (system, entry) = GameDatabase.shared.entry(named: source.lastPathComponent) else { return nil }
+        var game = Game(
+            id: UUID(),
+            title: entry.title,
+            system: system,
+            region: entry.region,
+            year: nil,
+            gameCode: entry.serial,
+            headerTitle: nil,
+            recognizedBy: .fileExtension,
+            fileName: source.lastPathComponent,
+            originalFileName: source.lastPathComponent,
+            archiveName: source.lastPathComponent,
+            fileSize: 0,
+            crc32: nil,
+            addedAt: .now,
+            artSeed: 0
+        )
+        game.apply(entry)
+        game.artSeed = seed(for: game.title)
         return game
     }
 

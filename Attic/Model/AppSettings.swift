@@ -38,6 +38,8 @@ final class AppSettings {
     /// a setting that is not in here has its own default.
     private(set) var performance: [String: String] { didSet { defaults.set(performance, forKey: "performance") } }
     var haptics: Bool { didSet { defaults.set(haptics, forKey: "haptics") } }
+    /// The game's sound plays also when the iPhone is on silent (the ring/silent switch).
+    var soundWhenSilent: Bool { didSet { defaults.set(soundWhenSilent, forKey: "soundWhenSilent") } }
     /// Games may make controllers and iPhones vibrate (the Rumble Pak and the like).
     var rumble: Bool { didSet { defaults.set(rumble, forKey: "rumble") } }
     /// Changed controller buttons, by way of playing (`ControlScheme.id`), controller button and the
@@ -47,8 +49,14 @@ final class AppSettings {
     }
     /// Other iPhones with Attic may ask to join a game as players 2 to 4 (`MultiplayerHost`).
     var allowPlayers: Bool { didSet { defaults.set(allowPlayers, forKey: "allowPlayers") } }
+    /// Playing together may also go straight between iPhones (AWDL, as AirDrop), not only over a
+    /// Wi-Fi network both are on (`PadLink.parameters`). Off to compare which runs more evenly.
+    var directWiFi: Bool { didSet { defaults.set(directWiFi, forKey: "directWiFi") } }
     /// Frames per second, speed and processor use over the game while playing.
     var showPerformance: Bool { didSet { defaults.set(showPerformance, forKey: "showPerformance") } }
+    /// A DS or 3DS game on a TV shows both screens there; otherwise only the top one, since the
+    /// touch screen is tapped on the iPhone.
+    var tvBothScreens: Bool { didSet { defaults.set(tvBothScreens, forKey: "tvBothScreens") } }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -64,9 +72,12 @@ final class AppSettings {
             "autosave": true,
             "rewind": true,
             "haptics": true,
+            "soundWhenSilent": false,
             "allowPlayers": false,
+            "directWiFi": true,
             "rumble": true,
             "showPerformance": false,
+            "tvBothScreens": false,
         ])
         layout = LibraryLayout(rawValue: defaults.string(forKey: "layout") ?? "") ?? .grid
         cardSize = CardSize(rawValue: defaults.string(forKey: "cardSize") ?? "") ?? .medium
@@ -80,10 +91,13 @@ final class AppSettings {
         rewind = defaults.bool(forKey: "rewind")
         performance = defaults.dictionary(forKey: "performance") as? [String: String] ?? Self.earlierPerformance(defaults)
         haptics = defaults.bool(forKey: "haptics")
+        soundWhenSilent = defaults.bool(forKey: "soundWhenSilent")
         allowPlayers = defaults.bool(forKey: "allowPlayers")
+        directWiFi = defaults.bool(forKey: "directWiFi")
         rumble = defaults.bool(forKey: "rumble")
         controllerMappings = defaults.dictionary(forKey: "controllerMappings") as? [String: [String: Int]] ?? [:]
         showPerformance = defaults.bool(forKey: "showPerformance")
+        tvBothScreens = defaults.bool(forKey: "tvBothScreens")
     }
 
     /// The speed settings from before they could be chosen per game, which had their own keys.

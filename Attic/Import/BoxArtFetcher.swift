@@ -10,6 +10,10 @@ struct BoxArtFetcher {
         case notFound
         /// Offline or a server problem: worth trying again later.
         case failed
+
+        var art: BoxArt? {
+            if case .found(let art) = self { art } else { nil }
+        }
     }
 
     let paths: LibraryPaths
@@ -26,7 +30,15 @@ struct BoxArtFetcher {
         for (url, source) in Self.candidates(for: game) {
             do {
                 let (data, response) = try await Self.session.data(from: url)
-                guard (response as? HTTPURLResponse)?.statusCode == 200, let image = UIImage(data: data) else { continue }
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                // Only "not there" (404) counts as no picture; a server error (500, 503, too many
+                // requests) is tried again next time instead of after a month.
+                guard status == 200, let image = UIImage(data: data) else {
+                    if status != 404 && status != 200 {
+                        failed = true
+                    }
+                    continue
+                }
                 guard let backdrop = store(image, for: game.id) else { return .failed }
                 return .found(BoxArt(source: source, fetchedAt: .now, backdrop: backdrop))
             } catch {

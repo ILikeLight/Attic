@@ -99,6 +99,29 @@ final class SaveStateStore {
         return state
     }
 
+    /// Keeps a state as a new slot with its own date, for an auto-save that is about to be replaced.
+    func keepAsSlot(_ state: SaveState, gameID: UUID) -> SaveState? {
+        let folder = folder(gameID)
+        let slot = nextSlot(for: gameID)
+        let kept = SaveState(id: "slot-\(slot)", slot: slot, date: state.date)
+        do {
+            for ext in ["state", "png"] {
+                let source = folder.appendingPathComponent("\(state.id).\(ext)")
+                if FileManager.default.fileExists(atPath: source.path) {
+                    try FileManager.default.copyItem(at: source, to: folder.appendingPathComponent("\(kept.id).\(ext)"))
+                }
+            }
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            try encoder.encode(kept).write(to: folder.appendingPathComponent(kept.id + ".json"), options: .atomic)
+        } catch {
+            return nil
+        }
+        cache[gameID] = nil
+        revision += 1
+        return kept
+    }
+
     /// Removes the state's three files.
     func delete(_ state: SaveState, gameID: UUID) {
         let folder = folder(gameID)

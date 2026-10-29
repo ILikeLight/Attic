@@ -118,11 +118,14 @@ CORES = {core.name: core for core in [
          # The Cached Interpreter is iCube's (Provenance-Emu/dolphin-ios-jitless): a much faster one
          # for devices without JIT, on the same upstream Dolphin (2609) as this libretro fork. iOS has no
          # libvulkan to load: the Vulkan functions come from the frontend, and the frontend reads 8-bit
-         # pictures. Save states pause the CPU thread for real before they touch its state. The iPhone's
-         # accelerometer moves the Wii Remote with a Nunchuk plugged in too.
+         # pictures. Save states pause the CPU thread for real before they touch its state, have room to
+         # grow, and a state that loads only in part is undone. The iPhone's accelerometer moves the Wii
+         # Remote with a Nunchuk plugged in too. A loaded state's Wii Remote without a player is
+         # disconnected instead of crashing the game.
          diffs=["dolphin/no-mgba.diff", "dolphin/cpu-thread-qos.diff", "dolphin/icube-cached-interpreter.diff",
                 "dolphin/libretro-vulkan-apple.diff", "dolphin/libretro-state-pause.diff",
-                "dolphin/libretro-nunchuk-motion.diff"],
+                "dolphin/libretro-nunchuk-motion.diff", "dolphin/libretro-state-size.diff",
+                "dolphin/libretro-wiimote-source.diff"],
          submodules=True,
          # Windows, desktop and Android libraries that the libretro build does not use.
          skip_submodules=["Externals/Qt", "Externals/FFmpeg-bin", "Externals/SDL/SDL", "Externals/cubeb/cubeb",
@@ -165,6 +168,9 @@ CORES = {core.name: core for core in [
                      "-DCITRA_USE_PRECOMPILED_HEADERS=OFF", "-DENABLE_LTO=OFF",
                      "-DCMAKE_C_FLAGS=-flto=thin", "-DCMAKE_CXX_FLAGS=-flto=thin",
                      "-DCMAKE_SHARED_LINKER_FLAGS=-flto=thin"],
+         # Attic's tree has no .git, so Azahar's revision is "UNKNOWN"; its state check then refused
+         # every state (savestate-revision.diff).
+         diffs=["azahar/savestate-revision.diff"],
          submodules=True,
          # Libraries for the stand-alone apps, tests, x86 and Android.
          skip_submodules=["externals/catch2", "externals/xbyak", "externals/libusb/libusb", "externals/cubeb",

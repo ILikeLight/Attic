@@ -2,6 +2,7 @@ import AtticLibretro
 import Foundation
 import Observation
 import Photos
+import Synchronization
 import UIKit
 
 /// One playing session: loads the game into its core, runs it, and handles
@@ -27,6 +28,8 @@ final class EmulatorSession {
     /// Rewinding is on for this game: the setting is on and the core can make save states.
     private(set) var canRewind = false
     private(set) var isRewinding = false
+    /// The save state the game was started from could not be loaded, so it started from the beginning.
+    private(set) var saveStateFailed = false
     /// Width / height of the (top) screen, as in the design for each system.
     let aspectRatio: CGFloat
 
@@ -43,6 +46,10 @@ final class EmulatorSession {
     @ObservationIgnored private var motion: WiiMotion?
     /// Players 2 to 4 from other iPhones (`MultiplayerHost`), in a game of a system with more ports.
     @ObservationIgnored let remotePlayers = RemotePlayers()
+    /// Writes the in-game saves every half minute while the game runs.
+    @ObservationIgnored private var batteryTimer: Task<Void, Never>?
+    /// The cartridge memory as last written, read and set on the emulation thread.
+    @ObservationIgnored private let writtenBattery = WrittenBattery()
     /// The Wii Remote is held sideways like a steering wheel now, as some minigames ask (Mario Party 8's
     /// races); its movement then turns with it. Chosen while playing, so not kept with the game.
     var holdsWiiRemoteSideways = false {
@@ -61,6 +68,12 @@ final class EmulatorSession {
     }
 
     var isActive: Bool { core != nil }
+
+    /// The game's sound plays also when the iPhone is on silent (Settings › Spelen).
+    var playsWhenSilent: Bool {
+        get { audio.playsWhenSilent }
+        set { audio.playsWhenSilent = newValue }
+    }
 
     private var batteryURL: URL { paths.saveFolder(game.id).appendingPathComponent("battery.sav") }
     private var clockURL: URL { paths.saveFolder(game.id).appendingPathComponent("battery.rtc") }
@@ -98,11 +111,11 @@ final class EmulatorSession {
         let stateData = saveState.flatMap { saveStates.data(for: $0, gameID: game.id) }
         let coreRewinds = rewind && profile.rewinds
 
-        let (error, rewinds): (String?, Bool) = await runner.performAndWait {
+        let (error, rewinds, stateLoaded): (String?, Bool, Bool) = await runner.performAndWait {
             do {
                 try core.load(gameAt: gameURL)
             } catch {
-                return (error.localizedDescription, false)
+                return (error.localizedDescription, false, false)
             }
             // Load the cartridge memory before the first frame, as RetroArch does.
             if let battery, let memory = core.memory(UInt32(RETRO_MEMORY_SAVE_RAM)) {
@@ -111,20 +124,26 @@ final class EmulatorSession {
             if let clock, let memory = core.memory(UInt32(RETRO_MEMORY_RTC)) {
                 clock.prefix(memory.count).copyBytes(to: memory)
             }
-            if let stateData, !core.unserialize(stateData) {
-                // Mupen64Plus only takes a state once it has run a frame.
-                core.audioEnabled = false
-                core.runFrame()
-                core.audioEnabled = true
-                _ = core.unserialize(stateData)
+            var stateLoaded = saveState == nil
+            if let stateData {
+                stateLoaded = core.unserialize(stateData)
+                if !stateLoaded {
+                    // Mupen64Plus only takes a state once it has run a frame.
+                    core.audioEnabled = false
+                    core.runFrame()
+                    core.audioEnabled = true
+                    stateLoaded = core.unserialize(stateData)
+                }
             }
             // GameCube and Wii states are tens of megabytes: too big to take several times a second.
             if coreRewinds, (1...(32 << 20)).contains(core.serializeSize) {
                 runner.rewind = RewindBuffer(stateSize: core.serializeSize, framesPerSecond: core.framesPerSecond)
             }
-            return (nil, runner.rewind != nil)
+            return (nil, runner.rewind != nil, stateLoaded)
         }
         canRewind = rewinds
+        saveStateFailed = saveState != nil && !stateLoaded
+        writtenBattery.data.withLock { $0 = battery }
         if let error {
             runner.stop()
             state = .failed(error)
@@ -186,6 +205,16 @@ final class EmulatorSession {
         runner.setPaused(false)
         runningSince = .now
         state = .running
+        // In-game saves are written every half minute while playing, so a crash or iOS closing
+        // the app loses little.
+        batteryTimer?.cancel()
+        batteryTimer = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard !Task.isCancelled else { return }
+                await self?.saveBattery()
+            }
+        }
     }
 
     func pause() {
@@ -203,7 +232,17 @@ final class EmulatorSession {
         runningSince = nil
         state = .paused
         monitor = nil
-        Task { await saveBattery() }
+        batteryTimer?.cancel()
+        batteryTimer = nil
+        // Pausing also happens on the way to the background, where iOS may suspend the app soon:
+        // the write gets time to finish.
+        let background = UIApplication.shared.beginBackgroundTask(withName: "Attic: in-game saves")
+        Task {
+            await saveBattery()
+            if background != .invalid {
+                UIApplication.shared.endBackgroundTask(background)
+            }
+        }
     }
 
     /// How the game keeps up since the previous call; nil while it is not running and the first time.
@@ -262,12 +301,15 @@ final class EmulatorSession {
         guard let core, let runner else { return }
         let batteryURL = batteryURL
         let clockURL = clockURL
+        let written = writtenBattery
         await runner.performAndWait {
             if let memory = core.memory(UInt32(RETRO_MEMORY_SAVE_RAM)) {
                 let data = Data(memory)
-                // An untouched GBA cartridge is all 0xFF; don't create a file for that.
-                if FileManager.default.fileExists(atPath: batteryURL.path) || data.contains(where: { $0 != 0xFF }) {
-                    try? data.write(to: batteryURL, options: .atomic)
+                // Only when it changed; an untouched GBA cartridge is all 0xFF, so no file for that.
+                let changed = written.data.withLock { $0 != data }
+                if changed, FileManager.default.fileExists(atPath: batteryURL.path) || data.contains(where: { $0 != 0xFF }),
+                   (try? data.write(to: batteryURL, options: .atomic)) != nil {
+                    written.data.withLock { $0 = data }
                 }
             }
             if let memory = core.memory(UInt32(RETRO_MEMORY_RTC)) {
@@ -298,6 +340,7 @@ final class EmulatorSession {
     /// Stops the game. Returns the time played in seconds and the auto-save, if one was made.
     func stop(autosave: Bool) async -> (played: TimeInterval, autosave: SaveState?) {
         pause()
+        batteryTimer?.cancel()
         var made: SaveState?
         if autosave {
             made = await saveState(slot: nil)
@@ -313,3 +356,9 @@ final class EmulatorSession {
 }
 
 extension EmulatorSession: PlayerSeats {}
+
+/// The cartridge memory as last written to battery.sav, so memory that did not change is not
+/// written again every half minute.
+final class WrittenBattery: Sendable {
+    let data = Mutex<Data?>(nil)
+}

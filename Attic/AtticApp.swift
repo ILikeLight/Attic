@@ -86,7 +86,12 @@ struct AtticApp: App {
         let inbox = LibraryPaths.shared.documents.appendingPathComponent("Inbox").path
         let ours = url.path.hasPrefix(inbox) || url.path.hasPrefix(LibraryPaths.shared.documents.path)
         importer.enqueue(.init(url: url, securityScoped: !ours, ownsSource: url.path.hasPrefix(inbox)))
-        router.playing = nil
-        router.showImport = true
+        if router.playing != nil {
+            // Closing the game now would leave it unsaved and its emulator loaded.
+            router.importAfterPlaying = true
+            toasts.show("Wordt toegevoegd; je ziet het als je stopt")
+        } else {
+            router.showImport = true
+        }
     }
 }

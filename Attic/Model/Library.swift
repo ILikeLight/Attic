@@ -114,12 +114,39 @@ final class Library {
     }
 
     private func load() {
-        guard let data = try? Data(contentsOf: paths.libraryFile) else { return }
+        let url = paths.libraryFile
+        guard let data = try? Data(contentsOf: url) else { return }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        games = (try? decoder.decode([Game].self, from: data)) ?? []
+        // Game by game: one that cannot be read (a damaged entry, or a field another version
+        // writes differently) costs only that game, not the whole library.
+        if let entries = try? decoder.decode([ReadableGame].self, from: data) {
+            games = entries.compactMap(\.game)
+            if games.count < entries.count {
+                keepCopy(of: url)
+            }
+        } else {
+            // Not readable at all: keep the file, so saving the next change does not lose it.
+            keepCopy(of: url)
+        }
         // Drop entries whose files are gone, for example after a failed restore.
         games.removeAll { !FileManager.default.fileExists(atPath: paths.gameFile($0).path) }
+    }
+
+    /// Keeps a copy of a library file that could not be read whole, next to it.
+    private func keepCopy(of url: URL) {
+        let copy = url.deletingLastPathComponent()
+            .appendingPathComponent("library-kapot-\(Int(Date.now.timeIntervalSince1970)).json")
+        try? FileManager.default.copyItem(at: url, to: copy)
+    }
+
+    /// A game from library.json, or nil when its entry cannot be read.
+    private struct ReadableGame: Decodable {
+        let game: Game?
+
+        init(from decoder: Decoder) throws {
+            game = try? Game(from: decoder)
+        }
     }
 
     private func save() {

@@ -15,18 +15,6 @@ struct ImportSheet: View {
             VStack(alignment: .leading, spacing: 18) {
                 if let job = importer.current {
                     switch job.outcome {
-                    case nil:
-                        ImportProgressView(job: job)
-                    case .added(let games, _):
-                        if let game = games.first {
-                            ImportDoneView(job: job, game: game, extraCount: games.count - 1) {
-                                router.play(game)
-                                close()
-                            } finish: {
-                                router.showLibrary(filter: nil)
-                                close()
-                            }
-                        }
                     case .duplicate(let game):
                         ImportResultView(job: job, title: "Staat al in je bibliotheek",
                                          message: "\(game.title) heb je al eerder toegevoegd. Er is niets dubbel bewaard.",
@@ -44,6 +32,15 @@ struct ImportSheet: View {
                             picking = true
                         } secondary: {
                             importer.dismissFinished()
+                        }
+                    default:
+                        // While adding and once added: one view, so the cover's reveal runs on.
+                        ImportRunView(job: job) { game in
+                            router.play(game)
+                            close()
+                        } finish: {
+                            router.showLibrary(filter: nil)
+                            close()
                         }
                     }
                 } else {
@@ -167,21 +164,97 @@ private struct ImportOption: View {
 
 // MARK: - Progress
 
-private struct ImportProgressView: View {
+/// The game being added: its cover and title decode while the archive unpacks (`DecodingCover`,
+/// `DecodingText`), and once it is added the same view offers to play it.
+private struct ImportRunView: View {
+    @Environment(\.accent) private var accent
     let job: ImportJob
+    let play: (Game) -> Void
+    let finish: () -> Void
+
+    private var added: [Game]? {
+        if case .added(let games, _) = job.outcome { games } else { nil }
+    }
+
+    private var game: Game? { added?.first ?? job.preview }
+
+    /// The cover follows the unpacking once the game is known; it is whole when the game is added.
+    private var coverProgress: Double {
+        guard game != nil else { return 0 }
+        if added != nil { return 1 }
+        return job.current == .extract ? job.progress : 1
+    }
+
+    /// The title is readable well before the cover is whole.
+    private var titleProgress: Double {
+        game == nil ? 0 : min(1, coverProgress * 1.6 + 0.1)
+    }
+
+    /// Until the game is known, the letters search for the archive's name without its tags.
+    private var title: String {
+        if let game { return game.title }
+        let name = (job.sourceName as NSString).deletingPathExtension
+        let bare = name.replacingOccurrences(of: #"\s*[\(\[][^\)\]]*[\)\]]"#, with: "", options: .regularExpression)
+        return bare.isEmpty ? name : bare
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Eyebrow(text: "Stap \(job.current.rawValue + 1) van 4")
-                ScreenTitle(text: "Spel toevoegen", size: 24)
-                Text("\(job.sourceName) · \(DisplayText.fileSize(job.sourceSize))")
-                    .font(.mono(13))
-                    .foregroundStyle(Palette.muted)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+        VStack(alignment: .leading, spacing: 22) {
+            HStack(spacing: 18) {
+                DecodingCover(game: game, progress: coverProgress, size: CGSize(width: 104, height: 138))
+                    .padding(2)
+                    .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        .strokeBorder(added != nil ? accent : Palette.lineStrong, lineWidth: 2))
+                VStack(alignment: .leading, spacing: 6) {
+                    if added != nil {
+                        Label("Toegevoegd", systemImage: "checkmark")
+                            .font(.text(13, weight: 700))
+                            .foregroundStyle(accent)
+                    } else {
+                        Eyebrow(text: "Stap \(job.current.rawValue + 1) van 4")
+                    }
+                    DecodingText(text: title, progress: titleProgress)
+                        .font(.display(24))
+                        .tracking(-0.48)
+                        .foregroundStyle(Palette.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let added, let game = added.first {
+                        Text([game.system.name, game.region, DisplayText.fileSize(game.fileSize)].compactMap { $0 }.joined(separator: " · "))
+                            .font(.text(13))
+                            .foregroundStyle(Palette.muted)
+                        if let code = game.gameCode {
+                            Text("spelcode \(code)")
+                                .font(.mono(12))
+                                .foregroundStyle(Palette.muted)
+                        }
+                        if added.count > 1 {
+                            Text("+ \(added.count - 1) \(added.count == 2 ? "ander spel" : "andere spellen")")
+                                .font(.text(12, weight: 600))
+                                .foregroundStyle(Palette.textSecondary)
+                        }
+                    } else {
+                        Text("\(job.sourceName) · \(DisplayText.fileSize(job.sourceSize))")
+                            .font(.mono(13))
+                            .foregroundStyle(Palette.muted)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                    }
+                }
             }
             ImportSteps(job: job)
+            if let game = added?.first {
+                VStack(spacing: 10) {
+                    if game.system.isPlayable {
+                        PrimaryButton(title: "Nu spelen", systemImage: "play.fill") { play(game) }
+                    } else {
+                        Text("\(game.system.coreName) voor \(game.system.name) \(game.system.arrival). Het spel staat alvast in je bibliotheek.")
+                            .font(.text(13))
+                            .lineSpacing(2)
+                            .foregroundStyle(Palette.muted)
+                    }
+                    SecondaryButton(title: "Naar bibliotheek", action: finish)
+                }
+            }
         }
     }
 }
@@ -279,61 +352,6 @@ private struct Spinner: View {
 }
 
 // MARK: - Results
-
-private struct ImportDoneView: View {
-    @Environment(\.accent) private var accent
-    let job: ImportJob
-    let game: Game
-    let extraCount: Int
-    let play: () -> Void
-    let finish: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            HStack(spacing: 18) {
-                GameCover(game: game, metrics: .badge, showNewBadge: false)
-                    .frame(width: 104, height: 138)
-                    .padding(2)
-                    .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(accent, lineWidth: 2))
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("Toegevoegd", systemImage: "checkmark")
-                        .font(.text(13, weight: 700))
-                        .foregroundStyle(accent)
-                    Text(game.title)
-                        .font(.display(24))
-                        .tracking(-0.48)
-                        .foregroundStyle(Palette.text)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text([game.system.name, game.region, DisplayText.fileSize(game.fileSize)].compactMap { $0 }.joined(separator: " · "))
-                        .font(.text(13))
-                        .foregroundStyle(Palette.muted)
-                    if let code = game.gameCode {
-                        Text("spelcode \(code)")
-                            .font(.mono(12))
-                            .foregroundStyle(Palette.muted)
-                    }
-                    if extraCount > 0 {
-                        Text("+ \(extraCount) \(extraCount == 1 ? "ander spel" : "andere spellen")")
-                            .font(.text(12, weight: 600))
-                            .foregroundStyle(Palette.textSecondary)
-                    }
-                }
-            }
-            ImportSteps(job: job)
-            VStack(spacing: 10) {
-                if game.system.isPlayable {
-                    PrimaryButton(title: "Nu spelen", systemImage: "play.fill", action: play)
-                } else {
-                    Text("\(game.system.coreName) voor \(game.system.name) \(game.system.arrival). Het spel staat alvast in je bibliotheek.")
-                        .font(.text(13))
-                        .lineSpacing(2)
-                        .foregroundStyle(Palette.muted)
-                }
-                SecondaryButton(title: "Naar bibliotheek", action: finish)
-            }
-        }
-    }
-}
 
 private struct ImportResultView: View {
     let job: ImportJob

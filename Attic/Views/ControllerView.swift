@@ -34,6 +34,7 @@ struct ControllerView: View {
             client.onRumble = { [rumble] strength in
                 rumble.set(port: 0, strength: strength)
             }
+            client.direct = settings.directWiFi
             client.search()
             UIApplication.shared.isIdleTimerDisabled = true
         }
@@ -130,16 +131,21 @@ struct ControllerView: View {
                                     .background(Palette.raised, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(host.title).font(.text(15, weight: 600)).foregroundStyle(Palette.text).lineLimit(2)
-                                    Text(host.system?.name ?? "Onbekend systeem").font(.text(12)).foregroundStyle(Palette.muted)
+                                    Text(host.isCompatible ? host.system?.name ?? "Onbekend systeem" : "Andere versie van Attic: werk Attic bij op beide iPhones")
+                                        .font(.text(12)).foregroundStyle(Palette.muted)
                                 }
                                 Spacer(minLength: 0)
-                                Text("Meedoen").font(.text(14, weight: 600)).foregroundStyle(accent)
+                                if host.isCompatible {
+                                    Text("Meedoen").font(.text(14, weight: 600)).foregroundStyle(accent)
+                                }
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
+                            .opacity(host.isCompatible ? 1 : 0.55)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.pressable)
+                        .disabled(!host.isCompatible)
                     }
                 }
             }
@@ -216,6 +222,9 @@ struct ControllerView: View {
                             SegmentedChoice(options: [.init(value: false, title: "Rechtop"), .init(value: true, title: "Dwars")],
                                             selection: Binding { client.holdsSideways } set: { client.holdsSideways = $0 })
                         }
+                    }
+                    if settings.showPerformance {
+                        ControllerLinkReadout(client: client)
                     }
                 }
                 .padding(.horizontal, 20)
@@ -307,6 +316,34 @@ struct ControllerView: View {
 
 /// A pad that stands for the TV screen: where a finger is on it, the Wii Remote points.
 /// The pointer stays where the finger left it, as on the iPhone with the game.
+/// Under Prestaties tonen: how this iPhone's messages go out, to set beside the figures on the
+/// iPhone with the game. "Sensor te laat" is how long the motion readings took to reach the app.
+private struct ControllerLinkReadout: View {
+    let client: MultiplayerClient
+    @State private var route = ""
+    @State private var perSecond: Double?
+    @State private var sensor: DeviceMotion.Delivery?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text("Via \(route)" + (perSecond.map { String(format: " · %.0f berichten/s", $0) } ?? ""))
+            if let sensor {
+                Text(String(format: "Sensor %.0f/s · te laat p95 %.0f · max %.0f ms",
+                            sensor.perSecond, sensor.lateness95, sensor.latenessMax))
+            }
+        }
+        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+        .foregroundStyle(Palette.textSecondary)
+        .accessibilityElement(children: .combine)
+        .task {
+            while !Task.isCancelled {
+                (route, perSecond, sensor) = client.linkFigures()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+}
+
 private struct PointerPad: View {
     let input: InputState
 

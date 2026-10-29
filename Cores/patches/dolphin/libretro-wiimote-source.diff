@@ -1,0 +1,42 @@
+diff -ruN a/Source/Core/Core/IOS/USB/Bluetooth/WiimoteDevice.cpp b/Source/Core/Core/IOS/USB/Bluetooth/WiimoteDevice.cpp
+--- a/Source/Core/Core/IOS/USB/Bluetooth/WiimoteDevice.cpp	2026-10-29 15:58:29
++++ b/Source/Core/Core/IOS/USB/Bluetooth/WiimoteDevice.cpp	2026-10-29 15:58:29
+@@ -114,6 +114,13 @@
+   p.Do(m_name);
+   p.Do(m_channels);
+   p.Do(m_connection_request_counter);
++
++  // Changed by Attic: a state can have a Wii Remote connected that has no player now, such as
++  // player 2 from another iPhone who has left. In libretro such a remote has no source (an
++  // unplugged port), and the game's first report to it crashed in ExecuteL2capCmd. It is
++  // disconnected instead, as if its batteries ran out; it connects again when a player joins.
++  if (p.IsReadMode() && !IsSourceValid() && IsConnected())
++    Activate(false);
+ }
+ 
+ u32 WiimoteDevice::GetNumber() const
+@@ -453,7 +460,9 @@
+       m_host->SendACLPacket(GetBD(), reinterpret_cast<const u8*>(&data_frame), sizeof(data_frame));
+ 
+       // Does the wii remote reply on the control or interrupt channel in this situation?
+-      m_hid_source->InterruptDataOutput(data + sizeof(hid_type), data_size - sizeof(hid_type));
++      // Changed by Attic: not to a remote without a source (see DoState).
++      if (IsSourceValid())
++        m_hid_source->InterruptDataOutput(data + sizeof(hid_type), data_size - sizeof(hid_type));
+     }
+     else
+     {
+@@ -465,8 +474,12 @@
+   case L2CAP_PSM_HID_INTR:
+   {
+     const u8 hid_type = data[0];
++    // Changed by Attic: not to a remote without a source (see DoState).
+     if (hid_type == ((WiimoteCommon::HID_TYPE_DATA << 4) | WiimoteCommon::HID_PARAM_OUTPUT))
+-      m_hid_source->InterruptDataOutput(data + sizeof(hid_type), data_size - sizeof(hid_type));
++    {
++      if (IsSourceValid())
++        m_hid_source->InterruptDataOutput(data + sizeof(hid_type), data_size - sizeof(hid_type));
++    }
+     else
+       ERROR_LOG_FMT(IOS_WIIMOTE, "Unknown HID-type ({:#x}) on L2CAP_PSM_HID_INTR", hid_type);
+   }

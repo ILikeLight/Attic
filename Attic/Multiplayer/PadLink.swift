@@ -11,11 +11,29 @@ enum PadLink {
     /// Raised when the messages change; a controller and host of different versions do not see each other.
     static let version: UInt8 = 3
 
-    static var parameters: NWParameters {
+    /// `direct`: also straight between iPhones (AWDL), not only over a Wi-Fi network both are on
+    /// (`AppSettings.directWiFi`). Off on either iPhone keeps their messages on the network.
+    static func parameters(direct: Bool) -> NWParameters {
         let parameters = NWParameters.udp
-        parameters.includePeerToPeer = true
+        parameters.includePeerToPeer = direct
         parameters.serviceClass = .interactiveVoice
         return parameters
+    }
+
+    /// How a connection runs, for the figures under Prestaties tonen: straight to the other iPhone
+    /// (AWDL, or Apple's low-latency link), over the Wi-Fi network, or the interface's own name.
+    static func route(of path: NWPath?) -> String {
+        guard let path, path.status == .satisfied else { return "geen verbinding" }
+        let names = path.availableInterfaces.map(\.name)
+        let local = path.localEndpoint.map { "\($0)" } ?? ""
+        if names.first.map({ $0.hasPrefix("awdl") || $0.hasPrefix("llw") }) == true
+            || local.contains("%awdl") || local.contains("%llw") {
+            return "rechtstreeks (\(names.first ?? "awdl"))"
+        }
+        if path.usesInterfaceType(.wifi) {
+            return "wifi-netwerk (\(names.first ?? "wifi"))"
+        }
+        return names.first ?? "onbekend"
     }
 
     /// The game a host plays, in its Bonjour TXT record, so a controller can show it before joining.
@@ -36,7 +54,9 @@ enum PadMessage: Equatable {
     case status(Status, player: Int, system: String, title: String, controller: String)
     /// A controller's buttons (libretro's, `PadButton.mask`) and sticks (-0x7FFF to 0x7FFF, y down),
     /// and with a Wii Remote its accelerometer as `WiiMotion` reads it (g; zero without movement).
-    case input(client: UUID, mask: UInt32, left: SIMD2<Int16>, right: SIMD2<Int16>, motion: SIMD3<Float>)
+    /// The stamp comes after the rest, so a host of an earlier 0.5 build reads the message all the
+    /// same; from such a controller it is nil.
+    case input(client: UUID, mask: UInt32, left: SIMD2<Int16>, right: SIMD2<Int16>, motion: SIMD3<Float>, stamp: InputStamp?)
     case leave(client: UUID)
     /// The host: how hard the game makes this player's controller vibrate, 0 to 255. Sent when it
     /// changes and with every answer, so a lost one is made good.
@@ -57,7 +77,7 @@ enum PadMessage: Equatable {
             data.append(string: system)
             data.append(string: title)
             data.append(string: controller)
-        case .input(let client, let mask, let left, let right, let motion):
+        case .input(let client, let mask, let left, let right, let motion, let stamp):
             data.append(3)
             data.append(client)
             data.append(little: mask)
@@ -67,6 +87,10 @@ enum PadMessage: Equatable {
             // In thousandths of g, up to ±32 g.
             for value in [motion.x, motion.y, motion.z] {
                 data.append(little: UInt16(bitPattern: Int16(clamping: Int((value * 1000).rounded()))))
+            }
+            if let stamp {
+                data.append(little: stamp.sequence)
+                data.append(little: stamp.sent)
             }
         case .leave(let client):
             data.append(4)
@@ -94,7 +118,8 @@ enum PadMessage: Equatable {
                   let lx = reader.int16(), let ly = reader.int16(), let rx = reader.int16(), let ry = reader.int16(),
                   let mx = reader.int16(), let my = reader.int16(), let mz = reader.int16() else { return nil }
             let motion = SIMD3(Float(mx), Float(my), Float(mz)) / 1000
-            self = .input(client: client, mask: mask, left: SIMD2(lx, ly), right: SIMD2(rx, ry), motion: motion)
+            let stamp = reader.uint16().flatMap { sequence in reader.uint32().map { InputStamp(sequence: sequence, sent: $0) } }
+            self = .input(client: client, mask: mask, left: SIMD2(lx, ly), right: SIMD2(rx, ry), motion: motion, stamp: stamp)
         case 4:
             guard let client = reader.uuid() else { return nil }
             self = .leave(client: client)
@@ -122,6 +147,10 @@ enum PadMessage: Equatable {
             bytes(4).map { $0.reversed().reduce(0) { $0 << 8 | UInt32($1) } }
         }
 
+        mutating func uint16() -> UInt16? {
+            bytes(2).map { UInt16($0[0]) | UInt16($0[1]) << 8 }
+        }
+
         mutating func int16() -> Int16? {
             bytes(2).map { Int16(bitPattern: UInt16($0[0]) | UInt16($0[1]) << 8) }
         }
@@ -135,6 +164,18 @@ enum PadMessage: Equatable {
             guard let length = byte(), let utf8 = bytes(Int(length)) else { return nil }
             return String(decoding: utf8, as: UTF8.self)
         }
+    }
+}
+
+/// When a controller sent an input message, to measure on the host how evenly they arrive
+/// (`LinkMonitor`): a number that goes up by one per message, and the controller's uptime in
+/// tenths of a millisecond. Both wrap around.
+struct InputStamp: Equatable {
+    var sequence: UInt16
+    var sent: UInt32
+
+    static func now(sequence: UInt16) -> InputStamp {
+        InputStamp(sequence: sequence, sent: UInt32(truncatingIfNeeded: DispatchTime.now().uptimeNanoseconds / 100_000))
     }
 }
 
